@@ -136,14 +136,20 @@ public class ExactTest {
 								InvalidEdgePruning e=new InvalidEdgePruning(b.Statistic, r_c.Graph, r_c.graph_size);
 								int invalid_edge=e.Prune();
 								
+								//wm: data structure that savesthe connected component details
 								ComponentDecom f=new ComponentDecom(r_c.Graph, r_c.graph_size, b.Statistic);
+								
+								//wm: data structure that save the denset core based of the lower bound
 								DensestCore my=new DensestCore(r_c.Graph,r_c.graph_size,0,0,0,0,r_c.graph_size);
 								
+								//wm: returns a queue that contains all the connected components (new vertex numbering, motif lists, amd lotif degree)
 								Queue<Component> r_q=f.decompose();
 								int r_q_size=r_q.size();
 							
 								
 								long pruning_time=System.currentTimeMillis();
+								
+
 								
 								DynamicExactalgo g=new DynamicExactalgo(r_q,my,Motif[0].length);
 								
