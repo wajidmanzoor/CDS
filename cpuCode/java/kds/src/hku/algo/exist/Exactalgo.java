@@ -54,14 +54,18 @@ public class Exactalgo {
 			bais=0.000000000000001;
 		}
 
-		//wm: generate a flownetwrok
+		//wm: generate a flownetwrok network 
+		// return the constructed flow network as map of hash maps (index start of edge, key end of edge, values array (capacity, remaining flow ))
 		Map<Integer,double[]>[] Network=flownetwork.Construct(alph);
 		
 
 		//wm: stores the S-T min cut
 		FindMinCut compute=new FindMinCut(Network, Network.length-2, Network.length-1);
 
+		//wm: store the result flow and average density
 		double res_flow=0,res_alph=0;
+
+		//wm : 
 		int res[]=new int[graph_size];
 		Arrays.fill(res, 1);
 		
@@ -70,18 +74,27 @@ public class Exactalgo {
 		while(u-l>bais) {
 			double temp=compute.EdmondsKarp();
 
-			//System.out.println(u+" "+l+" "+alph+" "+temp+" "+motif_num*motif_size);
-			System.out.println("upper_bound: "+u+"   low_bound:"+l+"   next guess:"+alph);
 			
 			if(temp==motif_num*motif_size) {
+
+				//wm: when S == {s}. set the upper limit to the guess
+				// which means subgraph has at max guess motif density 
 				u=alph;
 				
 
 			}else {
 
+				//wm: id S != {s}, verticies other than s are in S set of S-T cut
+				//wm: means the subgraph S-{s} has atleast alph motif density 
+
+				//wm: set lower bound to guess
 				l=alph;
+
+
 				res_alph=alph;
 				res_flow=temp;
+
+				//wm: get the densest subgraph 
 				int temp_array[]=compute.getparent();
 				for(int i=0;i<graph_size;++i) {
 					res[i]=temp_array[i];
@@ -89,12 +102,16 @@ public class Exactalgo {
 				
 
 			}
+
+			//wm: set new guess
 			alph=(u+l)/2;
+
+			//wm: update the network, by updating the capacity and availble flow of edges 
 			Network=flownetwork.Update(alph);
 			
 		}
 		
-
+		//wm: return the densest subgraph of the connected component
 		return res;
 	}
 	

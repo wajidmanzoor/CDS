@@ -50,34 +50,54 @@ public class FindMinCut {
 	 */
 	public double EdmondsKarp() {
 		parent=new int[FlowNetwork.length];
+
+		//wm: returns the min cut of augmented path and the augmented path 
 		double result=augmentPath(parent);
+
+		//wm: store the total flow of network
 		double sum=0;
+
 		double temp[];
 		
+		//wm: break then no augmented path is found
 		while(result!=-1) {
+
+			//wm: current vertex start from sink 
 			int cur=t;
 			double fre=0;
+
+			//wm: backtrack to update the available capacity 
 			while(cur!=s) {
 				
+				//wm: availble capacity before update
 				temp=FlowNetwork[parent[cur]].get(cur);
-				//System.out.println(temp[0]+" "+result);
+
+				//wm: 
 				fre=temp[0];
+
+				//wm: decreament min cut from the available capacity
 				temp[0]=temp[0]-result;
+
+				//wm: update the reverse edge, by increamenting the available capacity 
+				// this allows to reverse the flow from the forward edge if needed in future
 				temp=FlowNetwork[cur].get(parent[cur]);
 				temp[0]=temp[0]+result;
+
+				//wm: set current to the parrent of current
 				cur=parent[cur];
 				
 			}
-			//temp=FlowNetwork[523].get(0);
-			//double temp_temp=temp[0];
-			//temp=FlowNetwork[0].get(523);
-			//System.out.println((fre-0)+" "+result+" "+temp_temp+" "+temp[0]);
+			
+
+			//wm: increament the total flow of network by min cut of the augmented path.
 			sum+=result;
-			//System.out.println("*****"+result);
+			
+			//wm: get new augmented path 
 			result=augmentPath(parent);
-			//System.out.println(result);
+			
 		}
 		
+		//wm: return the total flow through network
 		return sum;
 	}
 	
@@ -87,40 +107,71 @@ public class FindMinCut {
 	 * @return the minimum capacity of each edge in the path
 	 */
 	private double augmentPath(int[] parent) {
+
+		//wm: saves the minimum cut- or maximum posible flow through the path
 		double maxflow=Integer.MAX_VALUE;
+
+		//wm: this stores the parent of the vertex in the flownetwork 
 		Arrays.fill(parent, -1);
+
+		//wm: queue for BFS
 		Queue<Integer> queue=new LinkedList<Integer>();
+
+		//wm: add source vertex to queue
 		queue.add(s);
+
+		//wm: set parent of source as source (as it is the starting point)
 		parent[s]=s;
 		double temp[];
 		
 		while(!queue.isEmpty()) {
 			int p=queue.poll();
+
+			//wm: if we reach the sink vertex
 			if(p==t) {
+
+				//wm: backtracking 
 				while(p!=s) {
-					//System.out.println(000);
+
+					//wm: available capacity 
 					temp=FlowNetwork[parent[p]].get(p);
+
+					//wm: code to find minimum cut (min available capacity)
 					if(maxflow>temp[0])
 						maxflow=temp[0];
+					//wm: backtrack to parent of vertex in flow network
 					p=parent[p];
 				}
+
+				//wm: if source is reached break 
 				break;
 			}
 			
+			//wm: BFS, iter through childern of vertex in flow network 
 			for(Entry<Integer, double[]> entry: FlowNetwork[p].entrySet()) {
+
+				//wm: availible and total capacity
 				temp=entry.getValue();
+
+				//wm: if childrn is not visited and has availible capacity 
 				if(parent[entry.getKey()]==-1&&temp[0]>0) {
+
+					//wm: mark childern as visited by setting it parent 
 					parent[entry.getKey()]=p;
+
+					//wm: add childern to queue
 					queue.add(entry.getKey());
-					//System.out.println(entry.getKey()+" "+p);
+					
 				}
 			}
 		}
 		
+		//wm: if path now found return -1
 		if(parent[t]==-1) {
-			//get the min-cut
 			return -1;
 		}
+
+		//wm: if path found return the maximum flow posible (minimum cut) throught the augementated path
 		return maxflow;
 	}
 	
@@ -129,6 +180,8 @@ public class FindMinCut {
 	 * @return the parent
 	 */
 	public int[] getparent() {
+
+		//wm: give the augmented path 
 		return parent;
 	}
 	
