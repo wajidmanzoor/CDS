@@ -40,16 +40,27 @@ public class Exactalgo {
 	 */
 	public int[] Exact(double l,double u,long motif_num) {
 		
+		//wm: construct a flow network 
 		FlowNetwork flownetwork=new FlowNetwork(Motif_Record, motif_size, graph_size, Motif_degree);
+
+		//wm: guessed motif density 
 		double alph=(u+l)/2;
+
+		//wm: minimum motif density difference
 		double bais=1.0/(graph_size*(graph_size-1));
+
+		//wm: stopping condition 
 		if(bais<0.000000000000001){
 			bais=0.000000000000001;
 		}
+
+		//wm: generate a flownetwrok
 		Map<Integer,double[]>[] Network=flownetwork.Construct(alph);
 		
+
+		//wm: stores the S-T min cut
 		FindMinCut compute=new FindMinCut(Network, Network.length-2, Network.length-1);
-		//System.out.println("eeee");
+
 		double res_flow=0,res_alph=0;
 		int res[]=new int[graph_size];
 		Arrays.fill(res, 1);
