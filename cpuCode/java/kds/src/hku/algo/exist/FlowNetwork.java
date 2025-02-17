@@ -46,12 +46,21 @@ public class FlowNetwork {
 	 */
 	@SuppressWarnings("unchecked")
 	public  Map<Integer,double[]>[] Construct(double alph) {
+
+
+		//wm: motif count 
 		int a=Motif_Record.size();
+
 		int i=0;double weight=0;
 		int temp_array[]=null;
+
+		//wm: 
 		FlowNetwork=new Map[a+graph_size+2];
+
+
 		for(i=0;i<a+graph_size+2;++i)
 			FlowNetwork[i]=new HashMap<Integer,double[]>();
+		
 		i=graph_size;
 		for(Entry<String, int[]> entry : Motif_Record.entrySet()) {
 			temp_array=entry.getValue();
