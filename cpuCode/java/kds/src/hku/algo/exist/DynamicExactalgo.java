@@ -119,6 +119,7 @@ public class DynamicExactalgo {
 			}
 //		}
 		
+		//wm: return the densest subgraph object
 		return mds;
 	}
 

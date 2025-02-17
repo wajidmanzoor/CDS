@@ -150,9 +150,10 @@ public class ExactTest {
 								long pruning_time=System.currentTimeMillis();
 								
 
-								
+								//wm: stores the intermediate results of algorithm
 								DynamicExactalgo g=new DynamicExactalgo(r_q,my,Motif[0].length);
 								
+								//wm: returns the denset subgraph by applying the core exact algorithm
 								MDS mds=g.DynamicExact();
 								
 								long stop_time=System.currentTimeMillis();
