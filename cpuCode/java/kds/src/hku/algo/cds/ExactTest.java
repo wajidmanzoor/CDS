@@ -136,7 +136,7 @@ public class ExactTest {
 								InvalidEdgePruning e=new InvalidEdgePruning(b.Statistic, r_c.Graph, r_c.graph_size);
 								int invalid_edge=e.Prune();
 								
-								//wm: data structure that savesthe connected component details
+								//wm: data structure that saves the connected component details
 								ComponentDecom f=new ComponentDecom(r_c.Graph, r_c.graph_size, b.Statistic);
 								
 								//wm: data structure that save the denset core based of the lower bound
