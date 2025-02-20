@@ -192,7 +192,7 @@ public class KList {
 
                                     int index=0;
 
-                                    //wm: reorder the neighors to put valid neighbor first
+                                    //wm: reorder the neighors of valid neighbors to put valid neighbor first
 
                                     //wm: iter through valid neighborsfrom end
                                     for(int m=graph[arr_temp].length-1;m>index;--m) {
