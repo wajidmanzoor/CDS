@@ -181,7 +181,7 @@ public class FindMinCut {
 	 */
 	public int[] getparent() {
 
-		//wm: give the augmented path 
+		//wm: give the subgraph  
 		return parent;
 	}
 	
