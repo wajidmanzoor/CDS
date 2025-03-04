@@ -29,6 +29,9 @@ void memoryAllocationGraph(deviceGraphPointers &G, Graph &graph){
 
 void memoryAllocationDAG(deviceDAGpointer &D, ui n, ui m){
     chkerr(cudaMalloc((void**)&(D.offset), (n+1) * sizeof(ui)));
+    chkerr(cudaMemset(D.offset,0,(n+1)*sizeof(ui)));
+
+    
     chkerr(cudaMalloc((void**)&(D.neighbors), m * sizeof(ui)));
     chkerr(cudaMalloc((void**)&(D.degree), n * sizeof(ui)));
     cudaDeviceSynchronize();
@@ -48,8 +51,12 @@ void memoryAllocationMotif(deviceMotifPointers &M, Motif &motif, ui n){
 void memoryAllocationComponent(deviceComponentPointers &C, ui n, ui m,){
 
     chkerr(cudaMalloc((void**)&(C.componentOffset), (n+1) * sizeof(ui)));
+    chkerr(cudaMemset(C.componentOffset,0,(n+1)*sizeof(ui)));
+
 
     chkerr(cudaMalloc((void**)&(C.offset), (n+1) * sizeof(ui)));
+    chkerr(cudaMemset(C.offset,0,(n+1)*sizeof(ui)));
+
 
     chkerr(cudaMalloc((void**)&(C.neighbors), (2*m) * sizeof(ui)));
 
@@ -77,12 +84,52 @@ void memoryAllocationresult(deviceResultpointer &R){
 }
 
 
-void memeoryAllocationTrie(deviceCliquesPointer &C, ui n, ui k){
-    chkerr(cudaMalloc((void**)&(C.trie), (n*k)*sizeof(ui)));
-    chkerr(cudaMalloc((void**)&(C.status),n*sizeof(ui)));
+void memeoryAllocationTrie(deviceCliquesPointer &C, ui t, ui k){
+    chkerr(cudaMalloc((void**)&(C.trie), (t*k)*sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(C.status),t*sizeof(ui)));
     cudaDeviceSynchronize();
 
 }
+
+ui memoryAllocationlevelData(cliqueLevelDataPointer &L,ui k,ui pSize, ui cpSize, ui maxDegree, ui totalWarps){
+    ui partialSize = totalWarps*pSize;
+    ui candidateSize = totalWarps*cpSize;
+    ui offsetSize = ((psize/(k-1)) + 1)*totalWarps;
+    ui maxBitMask = (maxDegree + 31)/32;
+    ui maskSize = (cpSize*maxBitMask)*totalWarps;
+    ui max_ = partialSize/(k-1)
+    chkerr(cudaMalloc((void**)&(L.partialCliquesPartition), partialSize*sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(L.partialCliques), partialSize*sizeof(ui)));
+
+    chkerr(cudaMalloc((void**)&(L.candidatesPartition),candidateSize*sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(L.candidates),candidateSize*sizeof(ui)));
+
+    chkerr(cudaMalloc((void**)&(L.validNeighMaskPartition),maskSize*sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(L.validNeighMask),maskSize*sizeof(ui)));
+
+
+
+    chkerr(cudaMalloc((void**)&(L.offsetPartition), offsetSize*sizeof(ui)));
+    chkerr(cudaMemset(L.offsetPartition,0,offsetSize*sizeof(ui)));
+
+    chkerr(cudaMalloc((void**)&(L.offset), offsetSize*sizeof(ui)));
+    chkerr(cudaMemset(L.offset,0,offsetSize*sizeof(ui)));
+    
+
+    chkerr(cudaMalloc((void**)&(L.count), (totalWarps+1)*sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(L.temp), (totalWarps+1)*sizeof(ui)));
+    chkerr(cudaMemset(L.temp,0,(totalWarps+1)*sizeof(ui)));
+    chkerr(cudaMemset(L.count,0,(totalWarps+1)*sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(L.max), sizeof(ui)));
+    chkerr(cudaMemcpy(L.max, &max_, sizeof(ui), cudaMemcpyHostToDevice));
+    cudaDeviceSynchronize();
+    return maxBitMask;
+
+    //TODO: ADD FREE 
+
+}
+
+
 
 
 
