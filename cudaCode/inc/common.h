@@ -50,7 +50,7 @@
 
 using namespace std;
 
-typedef unsigned int ui;
+typedef unsigned int ,ui;
 typedef unsigned short ushort;
 typedef unsigned char uchar;
 
@@ -113,8 +113,24 @@ typedef struct {
 
 }deviceCliquesPointer;
 
+typedef struct {
+    ui *partialCliquesPartition;
+    ui  *partialCliques;         // Flattened array of partial cliques
+    ui *candidatesPartition;       // Flattened array of candidate sets
+    ui *candidates;       // Flattened array of candidate sets
+    ui *offsetPartition;
+    ui *offset; 
+    ui *validNeighMaskPartition;   
+    ui *validNeighMask;       
+    ui *count; 
+    ui *temp;           // Number of partial cliques at this level
+    ui *max;
+}cliqueLevelDataPointer; 
+
 deviceGraphPointers *deviceGraph;
 deviceDAGpointer *deviceDAG;
+cliqueLevelDataPointer *levelData;
+deviceCliquesPointer *cliques;
 
 
 
