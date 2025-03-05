@@ -178,7 +178,7 @@ __global__ void flushParitions(deviceDAGpointer D, cliqueLevelDataPointer levelD
 }
 
 
-__global__ void listMidCliques(deviceDAGpointer D, cliqueLevelDataPointer levelData, ui &label,ui k,ui iterK, ui n, ui m,ui psize, ui cpSize, ui maxBitMask,ui totalTasks, ui level, ui totalWarps){
+__global__ void listMidCliques(deviceDAGpointer D, cliqueLevelDataPointer levelData, ui &label, ui k,ui iterK, ui n, ui m,ui psize, ui cpSize, ui maxBitMask,ui totalTasks, ui level, ui totalWarps){
 
     extern __shared__ char sharedMemory[];
     ui sizeOffset = 0;
@@ -212,6 +212,8 @@ __global__ void listMidCliques(deviceDAGpointer D, cliqueLevelDataPointer levelD
             
             int degree = D.degree[candidate];
             for(int j = laneId; j< degree; j+= warpSize ){
+                ui neigh = D.neighbors[neighOffset + j];
+
                 if(label[neigh] == iterK){
                     label[neigh] = iterK-1;
                     ui loc = atomicAdd( &counter[threadId.x/warpSize], 1);
@@ -269,13 +271,12 @@ __global__ void listMidCliques(deviceDAGpointer D, cliqueLevelDataPointer levelD
 
 }
 
-__global__ void writeFinalCliques(deviceDAGpointer D, cliqueLevelDataPointer levelData, deviceCliquesPointer trie, ui &label,ui k,ui iterK, ui n, ui m,ui psize, ui cpSize, ui maxBitMask,ui totalTasks, ui level, ui totalWarps){
-
+__global__ void writeFinalCliques(deviceGraphPointers G, deviceDAGpointer D, cliqueLevelDataPointer levelData, deviceCliquesPointer cliqueData, ui &globalCounter,ui k,ui iterK, ui n, ui m,ui psize, ui cpSize, ui maxBitMask,ui totalTasks, ui level, ui totalWarps){
     extern __shared__ char sharedMemory[];
     ui sizeOffset = 0;
 
     ui *counter = (ui * )(sharedMemory + sizeOffset);
-   
+    
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
@@ -292,70 +293,45 @@ __global__ void writeFinalCliques(deviceDAGpointer D, cliqueLevelDataPointer lev
 
         for(int iter = 0; iter <totalCandidates; iter ++){
             int candidate = levelData.candidate[start + iter];
-            if(laneId==0){
-                counter[threadId.x/warpSize] = 0;
-            }
-    
-            __syncwarp();
-
             int candidateOffset =  candidatePartition + levelData.offsetPartition[offsetPartition + levelData.count[warpId+1]];
 
             
             int degree = D.degree[candidate];
+            int iterMask = 0;
+            if(laneId==0){
+                counter[warpId]=0;
+            }
             for(int j = laneId; j< degree; j+= warpSize ){
-                if(label[neigh] == iterK){
-                    label[neigh] = iterK-1;
-                    ui loc = atomicAdd( &counter[threadId.x/warpSize], 1);
-                    levelData.candidatesPartition[writeOffset + loc] = neigh;
-    
+
+                int chunkEnd = min( (iterMaks + 1)*32, degree);
+                ui chunkMask = levelData.validNeighMask[(candidateOffset + i)*maxBitMask + iterMask];
+                ui lshift = j%32;
+                if(chunkMask & (1 << lshift)){
+                    ui neigh = D.neighbors[neighOffset + j];
+                    
+                    ui loc = atomicAdd(globalCounter,1);
+                    atomicAdd(&counter[warpId],1);
+                    for(int ind =0; ind < k-2; ind++){
+                        cliqueData.trie[trieSize * ind + loc] = levelData.partialCliques[levelData.count[warpId]+ iter*(k-1) + ind];
+                    }
+                    cliqueData.trie[trieSize * (k-2) + loc]  = candidate;
+                    cliqueData.trie[trieSize * (k-1) + loc] = neigh;
+                    cliqueData.status[loc]=1;
+                    atomicAdd(&G.cliqueDegree[neigh],1);
+                    atomicAdd(&G.cliqueDegree[candidate],1);
+
                 }
+                
     
             }
             __syncwarp();
-            if(laneId == 0 && counter[threadId.x/warpSize] > 0){
-                levelData.partialCliquesPartition[cliquePartition + levelData.count[warpId+1] * (k-1) + level ] = vertex;
-                levelData.count[warpId+1] +=1;
-                levelData.offsetPartition[offsetPartition + levelData.count[warpId+1]] =
-                    levelData.offsetPartition[offsetPartition + levelData.count[warpId+1] - 1] +counter[threadId.x/warpSize];
+
+            for(int j = laneId; j< k-2 ; j+= warpSize ){
+                int pClique = levelData.partialCliques[levelData.count[warpId]+ iter*(k-1) + j];
+                atomicAdd(&G.cliqueDegree[pClique],counter[warpId]);
             }
 
         }        
-    }
-
-    __syncwarp();
-
-    int totalTasks = levelData.count[warpId+1];
-
-    for(int iter = 0; iter < totalTasks; iter++){
-        int start = candidatePartition + levelData.offsetPartition[offsetPartition + iter];
-        int end =  candidatePartition + levelData.offsetPartition[offsetPartition + iter + 1];
-        int total = end-start;
-        for(int i = laneId; i < total; i+=warpSize){
-            int candidate = levelData.candidatesPartition[start+i]; 
-            int neighOffset = D.offset[candidate];
-            int degree = D.degree[candidate];
-
-            int numBitmasks = (degree + 31) / 32;
-
-            for (int bitmaskIndex = 0; bitmaskIndex < numBitmasks; bitmaskIndex++) {
-                unsigned int bitmask = 0; // Initialize bitmask to 0
-
-                // Iterate over the current chunk of 32 neighbors
-                int startNeighbor = bitmaskIndex * 32;
-                int endNeighbor = min(startNeighbor + 32, degree);
-                for (int j = startNeighbor; j < endNeighbor; j++) {
-                    if (label[D.neighbors[neighOffset + j]] == k - 1) {
-                        bitmask |= (1 << (j - startNeighbor)); // Set the bit for valid neighbors
-                    }
-                }
-
-                D.validNeighMaskPartition[ maskPartition + (levelData.offsetPartition[offsetPartition + iter] + i)*maxBitMask + bitmaskIndex] = bitmask;
-            
-            }
-
-
-        }
-
     }
 
 }
