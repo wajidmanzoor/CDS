@@ -339,4 +339,45 @@ __global__ void writeFinalCliques(deviceGraphPointers G, deviceDAGpointer D, cli
 
 
 
+__global__ void sortTrieData(deviceGraphPointers G, deviceCliquesPointer cliqueData, ui t, ui k, ui totalThreads){
 
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+
+    for(int i = idx; i <t; i+=totalThreads ){
+        ui elements[k];
+        ui degree[k];
+        for(int j=0;j<k;j++){
+            elements[j] = cliqueData.trie[j*t+i];
+            degree[j] = G.cliqueDegree[element];
+        }
+
+        // Use insertion sort, as it is best for small arrays 
+
+        for(j=1;j<k;j++){
+            ui insert_index = j;
+            int current_element = elements[j];
+            int current_degree = degree[current_element];
+            ui current = degree[element[j]];
+            for(int ind = j-1; ind>=0; ind-- ){
+                if(degree[elements[ind]] > ){current_degree
+                    elements[ind+1] = elements[ind];
+                    insert_index = ind;
+
+                }else{
+                    break;
+                }
+
+            }
+            elements[insert_index] = current_element;
+
+        }
+
+        for(int j=0;j<k;j++){
+            cliqueData.trie[j*t+i] = elements[j];
+    
+        }
+
+    }
+
+}
