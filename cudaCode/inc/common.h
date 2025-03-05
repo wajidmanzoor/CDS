@@ -130,7 +130,7 @@ typedef struct {
 deviceGraphPointers *deviceGraph;
 deviceDAGpointer *deviceDAG;
 cliqueLevelDataPointer *levelData;
-deviceCliquesPointer *cliques;
+deviceCliquesPointer *cliqueData;
 
 
 
