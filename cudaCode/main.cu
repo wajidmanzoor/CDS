@@ -60,8 +60,14 @@ int main(int argc, const char * argv[]) {
     memoryAllocationGraph(deviceGraph,G);
     memoryAllocationDAG(deviceDAG,G.n;G.m);
 
+    // THIS PART IS RELATED TO GENERATING DAG
+
+    ui *listOrder;
+    chkerr(cudaMalloc((void**)&(listOrder), n * sizeof(ui)));
+    chkerr(cudaMemcpy(listOrder, listingOrder->data(), n * sizeof(ui), cudaMemcpyHostToDevice));
+
     // Get out degree in DAG
-    generateDegreeDAG<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,deviceDAG,listingOrder,G.n, G.m,TOTAL_WARPS);
+    generateDegreeDAG<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,deviceDAG,listOrder,G.n, G.m,TOTAL_WARPS);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Generate Degree of DAG");
 
@@ -73,9 +79,14 @@ int main(int argc, const char * argv[]) {
     thrust::inclusive_scan(thrust::device_ptr < ui > (deviceDAG.offset), thrust::device_ptr < ui > (deviceDAG.offset + G.n + 1), thrust::device_ptr < ui > (deviceDAG.offset ));
 
     // Write neighbors of DAG
-    generateNeighborDAG<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,deviceDAG,listingOrder,G.n, G.m,TOTAL_WARPS);
+    generateNeighborDAG<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,deviceDAG,listOrder,G.n, G.m,TOTAL_WARPS);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Generate Neighbors of DAG");
+    chkerr(cudaFree(listOrder));
+
+
+    // THIS PART IS ABOUT CLIQUE LISTING ALGORITHM
+
     int maxDegree =0;
     ui maxBitMask = memoryAllocationlevelData(levelData,k,pSize,cpSize,maxDegree,TOTAL_WARPS);
     int level =0;
@@ -88,9 +99,11 @@ int main(int argc, const char * argv[]) {
     thrust::fill(dev_labels, dev_labels + n, iterK);
 
     chkerr(cudaMemcpy(G.degree, graph.degree->data(), n * sizeof(ui), cudaMemcpyHostToDevice));
-    //TODO:  Declare Labels and fill with iterK 
+
     //TODO SHARED MEMORY 
     listIntialCliques<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, label,iterK, G.n, G.m,psize,cpSize,maxBitMask,level,TOTAL_WARPS);
+    CUDA_CHECK_ERROR("Generate Intial Partial Cliques");
+
     iterK --;
     level ++;
     ui offsetPartitionSize = ((psize/(k-1)) + 1);
@@ -103,7 +116,9 @@ int main(int argc, const char * argv[]) {
     thrust::inclusive_scan(thrust::device, leveldata.temp, leveldata.temp + TOTAL_WARPS + 1, leveldata.temp);
     thrust::inclusive_scan(thrust::device, leveldata.count, leveldata.count + TOTAL_WARPS + 1, leveldata.count);
 
-    flushParitions<<<BLK_NUMS, BLK_DIM>>>( D, levelData,psize,cpSize,maxBitMask, level,TOTAL_WARPS);
+    flushParitions<<<BLK_NUMS, BLK_DIM>>>( deviceDAG, levelData,psize,cpSize,maxBitMask, level,TOTAL_WARPS);
+    CUDA_CHECK_ERROR("Flush Partition data structure");
+
     int totalTasks;
     chkerr(cudaMemcpy(&totalTasks,leveldata.count + TOTAL_WARPS, sizeof(ui), cudaMemcpyDeviceToHost));
 
@@ -112,7 +127,9 @@ int main(int argc, const char * argv[]) {
 
         //TODO: need to think a solution for label . Maybe use it masks will see 
         thrust::fill(dev_labels, dev_labels + n, iterK);
-        listMidCliques(D, levelData,label,k,iterK, G.n, G.m,psize,cpSize,maxBitMask,totalTasks,level,TOTAL_WARPS);
+        listMidCliques(deviceDAG, levelData,label,k,iterK, G.n, G.m,psize,cpSize,maxBitMask,totalTasks,level,TOTAL_WARPS);
+        CUDA_CHECK_ERROR("Generate Mid Partial Cliques");
+
         thrust::transform(thrust::device, thrust::make_counting_iterator(0), thrust::make_counting_iterator(TOTAL_WARPS), leveldata.temp + 1,
                       [leveldata.offsetPartition, leveldata.count,offsetPartitionSize] __device__ (int i) {
                           int task_count = leveldata.count[i];
@@ -122,30 +139,53 @@ int main(int argc, const char * argv[]) {
         thrust::inclusive_scan(thrust::device, leveldata.temp, leveldata.temp + TOTAL_WARPS + 1, leveldata.temp);
         thrust::inclusive_scan(thrust::device, leveldata.count, leveldata.count + TOTAL_WARPS + 1, leveldata.count);
 
-        flushParitions<<<BLK_NUMS, BLK_DIM>>>( D, levelData,psize,cpSize,k,maxBitMask,level,TOTAL_WARPS);
+        flushParitions<<<BLK_NUMS, BLK_DIM>>>( deviceDAG, levelData,psize,cpSize,k,maxBitMask,level,TOTAL_WARPS);
+        CUDA_CHECK_ERROR("Flush Partition data structure");
+
         chkerr(cudaMemcpy(&totalTasks,leveldata.count + TOTAL_WARPS, sizeof(ui), cudaMemcpyDeviceToHost));
         iterK --; 
         level ++;
     }
-    if(iterK == 2){
-        
-
-    }
-
-
-    //TODO: Free labels, 
-    //TODO: try to divide the Partition data and actual data into two data structures, so we can free partition before declaring trie
-    // A way to calculate T from num partial cliques X candidate sets
     ui t; 
-    memoryAllocationTrie(cliques, t, k);
+    //TODO: decide the total number cliques
+    chkerr(cudaFree(label));
+    freeLevelPartitionData(levelData);
     
-    //call k==2 kernel 
+    memoryAllocationTrie(cliqueData, t, k);
+    int totalCliques;
+
+    chkerr(cudaMalloc((void**)&totalCliques,sizeof(ui)));
+    chkerr(cudaMemset(totalCliques,0,sizeof(ui)));
+
+    if(iterK == 2){
+        writeFinalCliques<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, deviceDAG,  levelData,cliqueData,totalCliques,k,iterK, n, m,psize,cpSize, maxBitMask,totalTasks, level, TOTAL_WARPS);
+        CUDA_CHECK_ERROR("Generate Full Cliques");
+        
+    }
+    freeLevelData(levelData);
+    freeDAG(deviceDAG);
+
+    //TODO:  CLIQUE CORE DECOMPOSE
+
+    //TODO: LOCATE CORE
+
+    //TODO: LISTING AGAIN
+
+    //TODO: EDGE PRUNING
+
+    //TODO: COMPONENT DECOMPOSE
+
+    //TODO: DYNAMIC CORE EXACT
+
+
+
 
 
 
      
+    
+    
     freeGraph(deviceGraph);
-    freeDAG(deviceDAG);
     delete G;
     delete M;
     return 0;
