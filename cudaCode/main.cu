@@ -18,6 +18,18 @@ bool fileExists(const string& filename) {
     return (stat(filename.c_str(), &buffer) == 0);
 }
 
+void createLevelDataOffset(cliqueLevelDataPointer levelData, ui offsetPartitionSize, ui TOTAL_WARPS){
+    thrust::transform(thrust::device, thrust::make_counting_iterator(0), thrust::make_counting_iterator(TOTAL_WARPS), levelData.temp + 1,
+                      [levelData.offsetPartition, levelData.count,offsetPartitionSize] __device__ (int i) {
+                          int task_count = levelData.count[i];
+                          return (task_count > 0) ? levelData.offsetPartition[i * offsetPartitionSize + task_count] : 0;
+                      });
+
+    thrust::inclusive_scan(thrust::device, levelData.temp, levelData.temp + TOTAL_WARPS + 1, levelData.temp);
+    thrust::inclusive_scan(thrust::device, levelData.count, levelData.count + TOTAL_WARPS + 1, levelData.count);
+
+}
+
 void writeOrAppend(const string& filename, const string& data) {
     ofstream file;
     
@@ -107,20 +119,14 @@ int main(int argc, const char * argv[]) {
     iterK --;
     level ++;
     ui offsetPartitionSize = ((psize/(k-1)) + 1);
-    thrust::transform(thrust::device, thrust::make_counting_iterator(0), thrust::make_counting_iterator(TOTAL_WARPS), leveldata.temp + 1,
-                      [leveldata.offsetPartition, leveldata.count,offsetPartitionSize] __device__ (int i) {
-                          int task_count = leveldata.count[i];
-                          return (task_count > 0) ? leveldata.offsetPartition[i * offsetPartitionSize + task_count] : 0;
-                      });
 
-    thrust::inclusive_scan(thrust::device, leveldata.temp, leveldata.temp + TOTAL_WARPS + 1, leveldata.temp);
-    thrust::inclusive_scan(thrust::device, leveldata.count, leveldata.count + TOTAL_WARPS + 1, leveldata.count);
-
+    createLevelDataOffset(levelData,offsetPartitionSize,TOTAL_WARPS);
+    
     flushParitions<<<BLK_NUMS, BLK_DIM>>>( deviceDAG, levelData,psize,cpSize,maxBitMask, level,TOTAL_WARPS);
     CUDA_CHECK_ERROR("Flush Partition data structure");
 
     int totalTasks;
-    chkerr(cudaMemcpy(&totalTasks,leveldata.count + TOTAL_WARPS, sizeof(ui), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(&totalTasks,levelData.count + TOTAL_WARPS, sizeof(ui), cudaMemcpyDeviceToHost));
 
     
     while(iterK > 2 ){
@@ -130,19 +136,12 @@ int main(int argc, const char * argv[]) {
         listMidCliques(deviceDAG, levelData,label,k,iterK, G.n, G.m,psize,cpSize,maxBitMask,totalTasks,level,TOTAL_WARPS);
         CUDA_CHECK_ERROR("Generate Mid Partial Cliques");
 
-        thrust::transform(thrust::device, thrust::make_counting_iterator(0), thrust::make_counting_iterator(TOTAL_WARPS), leveldata.temp + 1,
-                      [leveldata.offsetPartition, leveldata.count,offsetPartitionSize] __device__ (int i) {
-                          int task_count = leveldata.count[i];
-                          return (task_count > 0) ? leveldata.offsetPartition[i * offsetPartitionSize + task_count] : 0;
-                      });
-
-        thrust::inclusive_scan(thrust::device, leveldata.temp, leveldata.temp + TOTAL_WARPS + 1, leveldata.temp);
-        thrust::inclusive_scan(thrust::device, leveldata.count, leveldata.count + TOTAL_WARPS + 1, leveldata.count);
+        createLevelDataOffset(levelData,offsetPartitionSize,TOTAL_WARPS);
 
         flushParitions<<<BLK_NUMS, BLK_DIM>>>( deviceDAG, levelData,psize,cpSize,k,maxBitMask,level,TOTAL_WARPS);
         CUDA_CHECK_ERROR("Flush Partition data structure");
 
-        chkerr(cudaMemcpy(&totalTasks,leveldata.count + TOTAL_WARPS, sizeof(ui), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(&totalTasks,levelData.count + TOTAL_WARPS, sizeof(ui), cudaMemcpyDeviceToHost));
         iterK --; 
         level ++;
     }
@@ -163,7 +162,14 @@ int main(int argc, const char * argv[]) {
         
     }
     freeLevelData(levelData);
+
+    sortTrieData<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData, totalCliques ,k, TOTAL_THREAD);
+    CUDA_CHECK_ERROR("Sort Trie Data Structure");
+
+
     freeDAG(deviceDAG);
+
+    // TODO: reorder Trie by motif degree
 
     //TODO:  CLIQUE CORE DECOMPOSE
 
