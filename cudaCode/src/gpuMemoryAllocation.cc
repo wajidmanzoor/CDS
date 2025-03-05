@@ -185,3 +185,22 @@ void freeDAG(deviceDAGpointer &D){
     chkerr(cudaFree(D.neighbors));
     chkerr(cudaFree(D.degree));
 }
+
+void freeLevelPartitionData(cliqueLevelDataPointer &L){
+    chkerr(cudaFree(L.partialCliquesPartition));
+    chkerr(cudaFree(L.candidatesPartition));
+    chkerr(cudaFree(L.offsetPartition));
+    chkerr(cudaFree(L.validNeighMaskPartition));
+    chkerr(cudaFree(L.temp));
+}
+
+void freeLevelData(cliqueLevelDataPointer &L){
+    chkerr(cudaFree(L.partialCliques));
+    chkerr(cudaFree(L.candidates));
+    chkerr(cudaFree(L.offset));
+    chkerr(cudaFree(L.validNeighMask));
+    chkerr(cudaFree(L.count));
+    chkerr(cudaFree(L.max));
+
+}
+
