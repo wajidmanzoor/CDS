@@ -50,7 +50,7 @@
 
 using namespace std;
 
-typedef unsigned int ,ui;
+typedef unsigned int ui;
 typedef unsigned short ushort;
 typedef unsigned char uchar;
 
