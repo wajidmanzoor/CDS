@@ -18,7 +18,6 @@
 
 #include <iostream>
 #include <cstdio>
-#include <vector
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -28,6 +27,8 @@
 #include <ctime>
 #include <sys/stat.h>
 #include <mutex>
+
+#ifdef __CUDACC__
 
 #include <cuda_runtime.h>
 #include <thrust/device_ptr.h>
@@ -39,6 +40,8 @@
 #include <thrust/sort.h>
 #include <thrust/gather.h>
 #include <thrust/scatter.h>
+
+#endif
 
 
 #define BLK_NUMS 432
@@ -127,10 +130,10 @@ typedef struct {
     ui *max;
 }cliqueLevelDataPointer; 
 
-deviceGraphPointers *deviceGraph;
-deviceDAGpointer *deviceDAG;
-cliqueLevelDataPointer *levelData;
-deviceCliquesPointer *cliqueData;
+extern  deviceGraphPointers *deviceGraph;
+extern  deviceDAGpointer *deviceDAG;
+extern  cliqueLevelDataPointer *levelData;
+extern  deviceCliquesPointer *cliqueData;
 
 
 
