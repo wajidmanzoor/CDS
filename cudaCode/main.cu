@@ -1,8 +1,7 @@
+#include "./inc/common.h"
 #include "./inc/graph.h"
 #include "./inc/motif.h"
 
-#include "./src/gpuMemoryAllocation.cc"
-#include "./src/helpers.cc"
 
 
 #define CUDA_CHECK_ERROR(kernelName) { \
@@ -61,16 +60,15 @@ int main(int argc, const char * argv[]) {
     ui pSize = atoi(argv[4]);
     ui cpSize = atoi(argv[5]);
 
-    Graph G = Graph(filepath);
+    Graph graph = Graph(filepath);
 
-    Motif M = Motif(motifPath);
-
-    deviceGraph = new deviceGraphPointers();
-    deviceDAG = new deviceDAGpointer();
-    levelData = new cliqueLevelDataPointer();
-    cliqueData = new deviceCliquesPointer();
+    //Motif M = Motif(motifPath);
 
     vector<ui> listingOrder;
+    listingOrder.resize(graph.n);
+    graph.getListingOrder(listingOrder);
+
+    //Tested
     
     G.getListingOrder(listingOrder);
     memoryAllocationGraph(*deviceGraph, G);
