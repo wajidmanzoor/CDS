@@ -1,5 +1,16 @@
 #include "../inc/graph.h"
 
+
+Graph::Graph() {
+    // Default constructor implementation
+}
+
+void Graph::printGraph() {
+    std::cout << "Print Hello" << std::endl;
+}
+void Graph::printGraph() {
+    std::cout << "Print Hello" << std::endl;
+}
 Graph::Graph(std::string path) {
     std::string buffer;
     std::ifstream inputFile(path, std::ios::in);
@@ -26,19 +37,12 @@ Graph::Graph(std::string path) {
                 offset[vertex + 1]++;
             }
             degree[vertex] = offset[vertex + 1];
+            offset[vertex + 1] += offset[vertex];
         }
     }
 
     inputFile.close();
     std::cout << "n =" << n << ", m=" << m << std::endl;
-}
-
-Graph::Graph() {
-    // Default constructor implementation
-}
-
-void Graph::printGraph() {
-    std::cout << "Print Hello" << std::endl;
 }
 
 void Graph::getListingOrder(std::vector<ui>& arr) {
