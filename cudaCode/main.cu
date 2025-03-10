@@ -18,16 +18,15 @@ bool fileExists(const string& filename) {
     return (stat(filename.c_str(), &buffer) == 0);
 }
 
-void createLevelDataOffset(cliqueLevelDataPointer levelData, ui offsetPartitionSize, ui TOTAL_WARPS){
+void createLevelDataOffset(cliqueLevelDataPointer levelData, ui offsetPartitionSize, ui TOTAL_WARPS) {
     thrust::transform(thrust::device, thrust::make_counting_iterator(0), thrust::make_counting_iterator(TOTAL_WARPS), levelData.temp + 1,
-                      [levelData.offsetPartition, levelData.count,offsetPartitionSize] __device__ (int i) {
+                      [=] __device__ (int i) {
                           int task_count = levelData.count[i];
                           return (task_count > 0) ? levelData.offsetPartition[i * offsetPartitionSize + task_count] : 0;
                       });
 
     thrust::inclusive_scan(thrust::device, levelData.temp, levelData.temp + TOTAL_WARPS + 1, levelData.temp);
     thrust::inclusive_scan(thrust::device, levelData.count, levelData.count + TOTAL_WARPS + 1, levelData.count);
-
 }
 
 void writeOrAppend(const string& filename, const string& data) {
@@ -66,32 +65,37 @@ int main(int argc, const char * argv[]) {
 
     Motif M = Motif(motifPath);
 
-    vector<ui> *listingOrder;
+    deviceGraph = new deviceGraphPointers();
+    deviceDAG = new deviceDAGpointer();
+    levelData = new cliqueLevelDataPointer();
+    cliqueData = new deviceCliquesPointer();
+
+    vector<ui> listingOrder;
     
-    G.getListingOrder(&listingOrder);
-    memoryAllocationGraph(deviceGraph,G);
-    memoryAllocationDAG(deviceDAG,G.n;G.m);
+    G.getListingOrder(listingOrder);
+    memoryAllocationGraph(*deviceGraph, G);
+    memoryAllocationDAG(*deviceDAG, G.n, G.m);
 
     // THIS PART IS RELATED TO GENERATING DAG
 
     ui *listOrder;
-    chkerr(cudaMalloc((void**)&(listOrder), n * sizeof(ui)));
-    chkerr(cudaMemcpy(listOrder, listingOrder->data(), n * sizeof(ui), cudaMemcpyHostToDevice));
+    chkerr(cudaMalloc((void**)&(listOrder), G.n * sizeof(ui)));
+    chkerr(cudaMemcpy(listOrder, listingOrder.data(), G.n * sizeof(ui), cudaMemcpyHostToDevice));
 
     // Get out degree in DAG
-    generateDegreeDAG<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,deviceDAG,listOrder,G.n, G.m,TOTAL_WARPS);
+    generateDegreeDAG<<<BLK_NUMS, BLK_DIM>>>(*deviceGraph, *deviceDAG, listOrder, G.n, G.m, TOTAL_WARPS);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Generate Degree of DAG");
 
     //copy out degree to offset
-    chkerr(cudaMemset(deviceDAG.neighbor, 0, sizeof(ui)));
-    chkerr(cudaMemcpy(deviceDAG.offset + 1,deviceDAG.degree , (G.n) * sizeof(ui), cudaMemcpyDevicetoDevice));
+    chkerr(cudaMemset(deviceDAG->neighbors, 0, sizeof(ui)));
+    chkerr(cudaMemcpy(deviceDAG->offset + 1, deviceDAG->degree, (G.n) * sizeof(ui), cudaMemcpyDeviceToDevice));
 
     // cummulative sum offset
-    thrust::inclusive_scan(thrust::device_ptr < ui > (deviceDAG.offset), thrust::device_ptr < ui > (deviceDAG.offset + G.n + 1), thrust::device_ptr < ui > (deviceDAG.offset ));
+    thrust::inclusive_scan(thrust::device_ptr<ui>(deviceDAG->offset), thrust::device_ptr<ui>(deviceDAG->offset + G.n + 1), thrust::device_ptr<ui>(deviceDAG->offset));
 
     // Write neighbors of DAG
-    generateNeighborDAG<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,deviceDAG,listOrder,G.n, G.m,TOTAL_WARPS);
+    generateNeighborDAG<<<BLK_NUMS, BLK_DIM>>>(*deviceGraph, *deviceDAG, listOrder, G.n, G.m, TOTAL_WARPS);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Generate Neighbors of DAG");
     chkerr(cudaFree(listOrder));
@@ -99,75 +103,71 @@ int main(int argc, const char * argv[]) {
 
     // THIS PART IS ABOUT CLIQUE LISTING ALGORITHM
 
-    int maxDegree =0;
-    ui maxBitMask = memoryAllocationlevelData(levelData,k,pSize,cpSize,maxDegree,TOTAL_WARPS);
-    int level =0;
+    int maxDegree = 0;
+    ui maxBitMask = memoryAllocationlevelData(*levelData, k, pSize, cpSize, maxDegree, TOTAL_WARPS);
+    int level = 0;
     int iterK = k;
 
     ui *labels;
-    chkerr(cudaMalloc((void**)&(labels), n * sizeof(ui)));
-
+    chkerr(cudaMalloc((void**)&(labels), G.n * sizeof(ui)));
     thrust::device_ptr<ui> dev_labels(labels);
-    thrust::fill(dev_labels, dev_labels + n, iterK);
+    thrust::fill(dev_labels, dev_labels + G.n, iterK);
 
-    chkerr(cudaMemcpy(G.degree, graph.degree->data(), n * sizeof(ui), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(deviceGraph->degree, G.degree.data(), G.n * sizeof(ui), cudaMemcpyHostToDevice));
 
     //TODO SHARED MEMORY 
-    listIntialCliques<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, label,iterK, G.n, G.m,psize,cpSize,maxBitMask,level,TOTAL_WARPS);
+    listIntialCliques<<<BLK_NUMS, BLK_DIM>>>(*deviceDAG, *levelData, labels, iterK, G.n, G.m, pSize, cpSize, maxBitMask, level, TOTAL_WARPS);
     CUDA_CHECK_ERROR("Generate Intial Partial Cliques");
 
-    iterK --;
-    level ++;
-    ui offsetPartitionSize = ((psize/(k-1)) + 1);
+    iterK--;
+    level++;
+    ui offsetPartitionSize = ((pSize / (k-1)) + 1);
 
-    createLevelDataOffset(levelData,offsetPartitionSize,TOTAL_WARPS);
+    createLevelDataOffset(*levelData, offsetPartitionSize, TOTAL_WARPS);
     
-    flushParitions<<<BLK_NUMS, BLK_DIM>>>( deviceDAG, levelData,psize,cpSize,maxBitMask, level,TOTAL_WARPS);
+    flushParitions<<<BLK_NUMS, BLK_DIM>>>(*deviceDAG, *levelData, pSize, cpSize, maxBitMask, level, TOTAL_WARPS);
     CUDA_CHECK_ERROR("Flush Partition data structure");
 
     int totalTasks;
-    chkerr(cudaMemcpy(&totalTasks,levelData.count + TOTAL_WARPS, sizeof(ui), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(&totalTasks, levelData->count + TOTAL_WARPS, sizeof(ui), cudaMemcpyDeviceToHost));
 
-    
-    while(iterK > 2 ){
-
-        //TODO: need to think a solution for label . Maybe use it masks will see 
-        thrust::fill(dev_labels, dev_labels + n, iterK);
-        listMidCliques(deviceDAG, levelData,label,k,iterK, G.n, G.m,psize,cpSize,maxBitMask,totalTasks,level,TOTAL_WARPS);
+    while(iterK > 2) {
+        thrust::fill(dev_labels, dev_labels + G.n, iterK);
+        listMidCliques<<<BLK_NUMS, BLK_DIM>>>(*deviceDAG, *levelData, labels, k, iterK, G.n, G.m, pSize, cpSize, maxBitMask, totalTasks, level, TOTAL_WARPS);
         CUDA_CHECK_ERROR("Generate Mid Partial Cliques");
 
-        createLevelDataOffset(levelData,offsetPartitionSize,TOTAL_WARPS);
+        createLevelDataOffset(*levelData, offsetPartitionSize, TOTAL_WARPS);
 
-        flushParitions<<<BLK_NUMS, BLK_DIM>>>( deviceDAG, levelData,psize,cpSize,k,maxBitMask,level,TOTAL_WARPS);
+        flushParitions<<<BLK_NUMS, BLK_DIM>>>(*deviceDAG, *levelData, pSize, cpSize, k, maxBitMask, level, TOTAL_WARPS);
         CUDA_CHECK_ERROR("Flush Partition data structure");
 
-        chkerr(cudaMemcpy(&totalTasks,levelData.count + TOTAL_WARPS, sizeof(ui), cudaMemcpyDeviceToHost));
-        iterK --; 
-        level ++;
+        chkerr(cudaMemcpy(&totalTasks, levelData->count + TOTAL_WARPS, sizeof(ui), cudaMemcpyDeviceToHost));
+        iterK--;
+        level++;
     }
-    ui t; 
+
+    ui t;
     //TODO: decide the total number cliques
-    chkerr(cudaFree(label));
-    freeLevelPartitionData(levelData);
+    chkerr(cudaFree(labels));
+    freeLevelPartitionData(*levelData);
     
-    memoryAllocationTrie(cliqueData, t, k);
+    memoryAllocationTrie(*cliqueData, t, k);
     int totalCliques;
 
-    chkerr(cudaMalloc((void**)&totalCliques,sizeof(ui)));
-    chkerr(cudaMemset(totalCliques,0,sizeof(ui)));
+    chkerr(cudaMalloc((void**)&totalCliques, sizeof(ui)));
+    chkerr(cudaMemset(totalCliques, 0, sizeof(ui)));
 
-    if(iterK == 2){
-        writeFinalCliques<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, deviceDAG,  levelData,cliqueData,totalCliques,k,iterK, n, m,psize,cpSize, maxBitMask,totalTasks, level, TOTAL_WARPS);
+    if(iterK == 2) {
+        writeFinalCliques<<<BLK_NUMS, BLK_DIM>>>(*deviceGraph, *deviceDAG, *levelData, *cliqueData, totalCliques, k, iterK, G.n, G.m, pSize, cpSize, maxBitMask, totalTasks, level, TOTAL_WARPS);
         CUDA_CHECK_ERROR("Generate Full Cliques");
-        
     }
-    freeLevelData(levelData);
 
-    sortTrieData<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData, totalCliques ,k, TOTAL_THREAD);
+    freeLevelData(*levelData);
+
+    sortTrieData<<<BLK_NUMS, BLK_DIM>>>(*deviceGraph, *cliqueData, totalCliques, k, TOTAL_THREAD);
     CUDA_CHECK_ERROR("Sort Trie Data Structure");
 
-
-    freeDAG(deviceDAG);
+    freeDAG(*deviceDAG);
 
     // TODO: reorder Trie by motif degree
 
@@ -183,16 +183,10 @@ int main(int argc, const char * argv[]) {
 
     //TODO: DYNAMIC CORE EXACT
 
-
-
-
-
-
-     
-    
-    
-    freeGraph(deviceGraph);
-    delete G;
-    delete M;
+    freeGraph(*deviceGraph);
+    delete deviceGraph;
+    delete deviceDAG;
+    delete levelData;
+    delete cliqueData;
     return 0;
 }
