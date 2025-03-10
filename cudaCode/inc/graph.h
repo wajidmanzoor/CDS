@@ -1,30 +1,31 @@
-
 #pragma once
 
 #include "common.h"
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <vector>
+#include <algorithm>
+#include <numeric>
 
-class Graph{
-
+class Graph {
+  public:
     ui n;
     ui m;
 
-    vector<ui> *offset;
-    vector<ui> *neighbors;
-    vector<ui> *degree;
-    vector<ui> *core;
-    vector<ui> *corePeelSequence;
-
-    string filePath;
-
-    Graph(string path);
-
+    std::vector<ui> offset;
+    std::vector<ui> neighbors;
+    std::vector<ui> degree;
+    std::vector<ui> core;
+    std::vector<ui> corePeelSequence;
+    std::string filePath;
+  
+  public:
+    Graph(std::string path);
     Graph();
+  
+    void getListingOrder(std::vector<ui>& arr);
+    void coreDecompose(std::vector<ui>& arr);
+    void printGraph();
+};
 
-    void getListingOrder(vector<ui> &arr);
-
-    void coreDecompose(vector<ui> &arr);
-
-    
-
-    
-}
