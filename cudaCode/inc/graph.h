@@ -21,11 +21,9 @@ class Graph {
     std::string filePath;
   
   public:
-    Graph(std::string path);
     Graph();
-  
+    Graph(std::string path);
     void getListingOrder(std::vector<ui>& arr);
     void coreDecompose(std::vector<ui>& arr);
-    void printGraph();
 };
 
