@@ -33,26 +33,31 @@ int main(int argc, const char * argv[]) {
     chkerr(cudaMalloc((void**)&(listOrder), graph.n * sizeof(ui)));
     chkerr(cudaMemcpy(listOrder, listingOrder.data(), graph.n * sizeof(ui), cudaMemcpyHostToDevice));
 
-    //Tested
 
-    
+
     // Get out degree in DAG
-    generateDegreeDAG<<<BLK_NUMS, BLK_DIM>>>(*deviceGraph, *deviceDAG, listOrder, G.n, G.m, TOTAL_WARPS);
+    generateDegreeDAG<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, deviceDAG, listOrder, graph.n, graph.m, TOTAL_WARPS);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Generate Degree of DAG");
 
+
     //copy out degree to offset
-    chkerr(cudaMemset(deviceDAG->neighbors, 0, sizeof(ui)));
-    chkerr(cudaMemcpy(deviceDAG->offset + 1, deviceDAG->degree, (G.n) * sizeof(ui), cudaMemcpyDeviceToDevice));
+    chkerr(cudaMemset(deviceDAG.offset, 0, sizeof(ui)));
+    chkerr(cudaMemcpy(deviceDAG.offset + 1, deviceDAG.degree, (graph.n) * sizeof(ui), cudaMemcpyDeviceToDevice));
 
     // cummulative sum offset
-    thrust::inclusive_scan(thrust::device_ptr<ui>(deviceDAG->offset), thrust::device_ptr<ui>(deviceDAG->offset + G.n + 1), thrust::device_ptr<ui>(deviceDAG->offset));
+    thrust::inclusive_scan(thrust::device_ptr<ui>(deviceDAG.offset), thrust::device_ptr<ui>(deviceDAG.offset + graph.n + 1), thrust::device_ptr<ui>(deviceDAG.offset));
+
 
     // Write neighbors of DAG
-    generateNeighborDAG<<<BLK_NUMS, BLK_DIM>>>(*deviceGraph, *deviceDAG, listOrder, G.n, G.m, TOTAL_WARPS);
+    size_t sharedMemoryGenDagNeig =  WARPS_EACH_BLK * sizeof(ui);
+    generateNeighborDAG<<<BLK_NUMS, BLK_DIM,sharedMemoryGenDagNeig>>>(deviceGraph, deviceDAG, listOrder, graph.n, graph.m, TOTAL_WARPS);
     cudaDeviceSynchronize();
-    CUDA_CHECK_ERROR("Generate Neighbors of DAG");
+    CUDA_CHECK_ERROR("Generate Neighbor of DAG");
+
     chkerr(cudaFree(listOrder));
+
+    //Tested
 
 
     // THIS PART IS ABOUT CLIQUE LISTING ALGORITHM

@@ -22,32 +22,45 @@ __global__ void generateDegreeDAG(deviceGraphPointers G, deviceDAGpointer D, ui 
         }
         unsigned mask = __ballot_sync(0xFFFFFFFF, count > 0);
         int total_count = __popc(mask);
-        
+
         if(laneId == 0) {
             D.degree[i] = total_count;
         }
     }
 }
 
-
 __global__ void generateNeighborDAG(deviceGraphPointers G, deviceDAGpointer D, ui *listingOrder, ui n, ui m, ui totalWarps) {
+
+     extern __shared__ char sharedMemory[];
+    ui sizeOffset = 0;
+
+    ui *counter = (ui *)(sharedMemory + sizeOffset);
+
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
-
+   
     for(ui i = warpId; i < n; i += totalWarps) {
+        if(laneId==0){
+          counter[threadIdx.x / warpSize] = D.offset[i];
+          //printf("warp %d  counter[%d] = %d\n", i, threadIdx.x / warpSize, counter[threadIdx.x / warpSize]);
+        }
+        __syncwarp();
         ui start = G.offset[i];
         ui end = G.offset[i+1];
         ui total = end - start;
         ui neigh;
-        int offset = G.offset[i];
+        //printf("warp %d  start %d end %d total %d\n", i, start, end, total);
         for(int j = laneId; j < total; j += warpSize) {
             neigh = G.neighbors[start + j];
+
             if(listingOrder[i] < listingOrder[neigh]) {
-                int loc = atomicAdd(&offset, 1);
-                G.neighbors[loc] = neigh;
+                int loc = atomicAdd(&counter[threadIdx.x / warpSize], 1);
+                D.neighbors[loc] = neigh;
+
             }
         }
+      __syncwarp();
     }
 }
 
