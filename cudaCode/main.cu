@@ -2,51 +2,7 @@
 #include "./inc/graph.h"
 #include "./inc/motif.h"
 
-
-
-#define CUDA_CHECK_ERROR(kernelName) { \
-    cudaError_t err = cudaGetLastError(); \
-    if (err != cudaSuccess) { \
-        printf("CUDA Error in kernel %s, file %s at line %d: %s\n", kernelName, __FILE__, __LINE__, cudaGetErrorString(err)); \
-        exit(EXIT_FAILURE); \
-    } \
-}
-
-bool fileExists(const string& filename) {
-    struct stat buffer;
-    return (stat(filename.c_str(), &buffer) == 0);
-}
-
-void createLevelDataOffset(cliqueLevelDataPointer levelData, ui offsetPartitionSize, ui TOTAL_WARPS) {
-    thrust::transform(thrust::device, thrust::make_counting_iterator(0), thrust::make_counting_iterator(TOTAL_WARPS), levelData.temp + 1,
-                      [=] __device__ (int i) {
-                          int task_count = levelData.count[i];
-                          return (task_count > 0) ? levelData.offsetPartition[i * offsetPartitionSize + task_count] : 0;
-                      });
-
-    thrust::inclusive_scan(thrust::device, levelData.temp, levelData.temp + TOTAL_WARPS + 1, levelData.temp);
-    thrust::inclusive_scan(thrust::device, levelData.count, levelData.count + TOTAL_WARPS + 1, levelData.count);
-}
-
-void writeOrAppend(const string& filename, const string& data) {
-    ofstream file;
-    
-    // Check if the file exists
-    if (fileExists(filename)) {
-        // Open the file in append mode if it exists
-        file.open(filename, ios::app);
-    } else {
-        // Open the file in write mode if it doesn't exist
-        file.open(filename);
-    }
-    
-    if (file.is_open()) {
-        file << data << endl;
-        file.close();
-    } else {
-        cerr << "Unable to open the file." << endl;
-    }
-}
+#include "./utils/cuda_utils.cuh"
 
 int main(int argc, const char * argv[]) {
     if (argc != 6) {
@@ -68,18 +24,18 @@ int main(int argc, const char * argv[]) {
     listingOrder.resize(graph.n);
     graph.getListingOrder(listingOrder);
 
-    //Tested
-    
-    G.getListingOrder(listingOrder);
-    memoryAllocationGraph(*deviceGraph, G);
-    memoryAllocationDAG(*deviceDAG, G.n, G.m);
+    memoryAllocationGraph(deviceGraph, graph);
+    memoryAllocationDAG(deviceDAG, graph.n, graph.m);
 
     // THIS PART IS RELATED TO GENERATING DAG
 
     ui *listOrder;
-    chkerr(cudaMalloc((void**)&(listOrder), G.n * sizeof(ui)));
-    chkerr(cudaMemcpy(listOrder, listingOrder.data(), G.n * sizeof(ui), cudaMemcpyHostToDevice));
+    chkerr(cudaMalloc((void**)&(listOrder), graph.n * sizeof(ui)));
+    chkerr(cudaMemcpy(listOrder, listingOrder.data(), graph.n * sizeof(ui), cudaMemcpyHostToDevice));
 
+    //Tested
+
+    
     // Get out degree in DAG
     generateDegreeDAG<<<BLK_NUMS, BLK_DIM>>>(*deviceGraph, *deviceDAG, listOrder, G.n, G.m, TOTAL_WARPS);
     cudaDeviceSynchronize();
