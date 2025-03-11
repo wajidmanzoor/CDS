@@ -28,21 +28,6 @@
 #include <sys/stat.h>
 #include <mutex>
 
-#ifdef __CUDACC__
-
-#include <cuda_runtime.h>
-#include <thrust/device_ptr.h>
-#include <thrust/device_vector.h>
-#include <thrust/copy.h>
-#include <thrust/transform.h>
-#include <thrust/functional.h>
-#include <thrust/sequence.h>
-#include <thrust/sort.h>
-#include <thrust/gather.h>
-#include <thrust/scatter.h>
-
-#endif
-
 
 #define BLK_NUMS 432
 #define BLK_DIM 512
@@ -130,10 +115,10 @@ typedef struct {
     ui *max;
 }cliqueLevelDataPointer; 
 
-extern  deviceGraphPointers *deviceGraph;
-extern  deviceDAGpointer *deviceDAG;
-extern  cliqueLevelDataPointer *levelData;
-extern  deviceCliquesPointer *cliqueData;
+extern  deviceGraphPointers deviceGraph;
+extern  deviceDAGpointer deviceDAG;
+extern  cliqueLevelDataPointer levelData;
+extern  deviceCliquesPointer cliqueData;
 
 
 

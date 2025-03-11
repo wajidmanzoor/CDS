@@ -1,3 +1,8 @@
+#include "../utils/cuda_utils.cuh"
+#include "../inc/helpers.cuh"
+
+
+
 __global__ void generateDegreeDAG(deviceGraphPointers G, deviceDAGpointer D, ui *listingOrder, ui n, ui m, ui totalWarps) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
