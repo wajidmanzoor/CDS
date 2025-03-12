@@ -57,32 +57,42 @@ int main(int argc, const char * argv[]) {
 
     chkerr(cudaFree(listOrder));
 
-    //Tested
-
 
     // THIS PART IS ABOUT CLIQUE LISTING ALGORITHM
 
-    int maxDegree = 0;
-    ui maxBitMask = memoryAllocationlevelData(*levelData, k, pSize, cpSize, maxDegree, TOTAL_WARPS);
+    thrust::device_ptr<ui> dev_degree(deviceDAG.degree);
+
+
+    auto max_iter = thrust::max_element(dev_degree, dev_degree + graph.n);
+
+    int maxDegree = *max_iter;
+
+    cout<<"max deg "<<maxDegree<<endl;
+    ui maxBitMask = memoryAllocationlevelData(levelData, k, pSize, cpSize, maxDegree, TOTAL_WARPS);
+
+    cout<<"max bits "<<maxBitMask<<endl;
     int level = 0;
     int iterK = k;
 
     ui *labels;
-    chkerr(cudaMalloc((void**)&(labels), G.n * sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(labels), (graph.n * TOTAL_WARPS) * sizeof(ui)));
     thrust::device_ptr<ui> dev_labels(labels);
-    thrust::fill(dev_labels, dev_labels + G.n, iterK);
+    thrust::fill(dev_labels, dev_labels + graph.n, iterK);
 
-    chkerr(cudaMemcpy(deviceGraph->degree, G.degree.data(), G.n * sizeof(ui), cudaMemcpyHostToDevice));
+    chkerr(cudaMemcpy(deviceGraph.degree, graph.degree.data(), graph.n * sizeof(ui), cudaMemcpyHostToDevice));
 
-    //TODO SHARED MEMORY 
-    listIntialCliques<<<BLK_NUMS, BLK_DIM>>>(*deviceDAG, *levelData, labels, iterK, G.n, G.m, pSize, cpSize, maxBitMask, level, TOTAL_WARPS);
+    //Tested
+
+
+    size_t sharedMemoryIntialClique =  WARPS_EACH_BLK * sizeof(ui);
+    listIntialCliques<<<1, 64,sharedMemoryIntialClique>>>(deviceDAG, levelData, labels, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, level, TOTAL_WARPS);
     CUDA_CHECK_ERROR("Generate Intial Partial Cliques");
 
     iterK--;
     level++;
     ui offsetPartitionSize = ((pSize / (k-1)) + 1);
 
-    createLevelDataOffset(*levelData, offsetPartitionSize, TOTAL_WARPS);
+    createLevelDataOffset(levelData, offsetPartitionSize, TOTAL_WARPS);
     
     flushParitions<<<BLK_NUMS, BLK_DIM>>>(*deviceDAG, *levelData, pSize, cpSize, maxBitMask, level, TOTAL_WARPS);
     CUDA_CHECK_ERROR("Flush Partition data structure");
