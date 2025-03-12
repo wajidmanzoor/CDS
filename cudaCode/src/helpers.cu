@@ -79,6 +79,7 @@ __global__ void listIntialCliques(deviceDAGpointer D, cliqueLevelDataPointer lev
     int maskPartition = warpId * cpSize * maxBitMask;
 
     for(int i = warpId; i < n; i += totalWarps) {
+
         ui vertex = i;
         ui neighOffset = D.offset[vertex];
         if(laneId == 0) {
@@ -87,6 +88,8 @@ __global__ void listIntialCliques(deviceDAGpointer D, cliqueLevelDataPointer lev
 
         __syncwarp();
         int candidateOffset = candidatePartition + levelData.offsetPartition[offsetPartition + levelData.count[warpId + 1]];
+        
+
         for(int j = laneId; j < D.degree[vertex]; j += warpSize) {
             ui neigh = D.neighbors[neighOffset + j];
             if(label[warpId*n + neigh] == k) {
@@ -101,6 +104,10 @@ __global__ void listIntialCliques(deviceDAGpointer D, cliqueLevelDataPointer lev
             levelData.count[warpId + 1] += 1;
             levelData.offsetPartition[offsetPartition + levelData.count[warpId + 1]] =
                 levelData.offsetPartition[offsetPartition + levelData.count[warpId + 1] - 1] + counter[threadIdx.x / warpSize];
+        }
+         __syncwarp();
+        for(int i = laneId; i<n;i+=32){
+          label[warpId*n + i] = k;
         }
     }
 
@@ -135,7 +142,9 @@ __global__ void listIntialCliques(deviceDAGpointer D, cliqueLevelDataPointer lev
             }
         }
     }
+   
 }
+
 
 __global__ void flushParitions(deviceDAGpointer D, cliqueLevelDataPointer levelData, ui psize, ui cpSize, ui k, ui maxBitMask, ui level, ui totalWarps){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
