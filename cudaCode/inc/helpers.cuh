@@ -2,16 +2,6 @@
 
 #include "common.h"
 #include "graph.h"
-#include "motif.h"
-
-// Kernel function declarations
-__global__ void generateDegreeDAG(deviceGraphPointers G, deviceDAGpointer D, ui *listingOrder, ui n, ui m, ui totalWarps);
-__global__ void generateNeighborDAG(deviceGraphPointers G, deviceDAGpointer D, ui *listingOrder, ui n, ui m, ui totalWarps);
-%%writefile helpers.cuh
-#pragma once
-
-#include "common.h"
-#include "graph.h"
 
 // Kernel function declarations
 __global__ void generateDegreeDAG(deviceGraphPointers G, deviceDAGpointer D, ui *listingOrder, ui n, ui m, ui totalWarps);

@@ -146,36 +146,41 @@ __global__ void listIntialCliques(deviceDAGpointer D, cliqueLevelDataPointer lev
 }
 
 
-__global__ void flushParitions(deviceDAGpointer D, cliqueLevelDataPointer levelData, ui psize, ui cpSize, ui k, ui maxBitMask, ui level, ui totalWarps){
+__global__ void flushParitions(deviceDAGpointer D, cliqueLevelDataPointer levelData, ui pSize, ui cpSize, ui k, ui maxBitMask, ui level, ui totalWarps){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
-    int cliquePartition  = warpId*pSize;
-    int offsetPartition = warpId*(pSize/(k-1)+1);
-    int candidatePartition = warpId*cpSize;
-    int maskPartition = WarpId*cpSize*maxBitMask; 
+    int cliquePartition = warpId * pSize;
+    int offsetPartition = warpId * (pSize / (k-1) + 1);
+    int candidatePartition = warpId * cpSize;
+    int maskPartition = warpId * cpSize * maxBitMask;
 
     int totalTasks = levelData.count[warpId+1] - levelData.count[warpId];
+    //printf("warp %d totalTasks %d, offsetPartition %d offset part %d \n", warpId, totalTasks,candidatePartition,offsetPartition);
 
     for(int iter = 0; iter < totalTasks; iter++){
         int start = candidatePartition + levelData.offsetPartition[offsetPartition + iter];
         int end = candidatePartition + levelData.offsetPartition[offsetPartition + iter+ 1];
-        int total end-start;
+        int total = end-start;
+        //printf("warp %d start %d end %d total %d\n", warpId, start, end, total);
         int writeOffset = levelData.temp[warpId] + levelData.offsetPartition[offsetPartition + iter];
         for(int i = laneId; i < total; i+=warpSize){
+           ui candidate = levelData.candidatesPartition[start + i];
             levelData.candidates[writeOffset+ i] = levelData.candidatesPartition[start + i];
             if(i< level){
-                levelData.partialCliques[levelData.count[warpId]+ iter*(k-1) + i] = leveldata.partialCliquesPartition[cliquePartition + iter * (k-1) + i]
+          
+                levelData.partialCliques[levelData.count[warpId]*(k-1)+ iter*(k-1) + i] = levelData.partialCliquesPartition[cliquePartition + iter * (k-1) + i];
+                printf("warp Id %d lane id %d count %d iter % d pclique %d level %d write loc %d \n",warpId,i,levelData.count[warpId],iter,levelData.partialCliquesPartition[cliquePartition + iter * (k-1) + i],i,levelData.count[warpId]+ iter*(k-1) + i);
             }
             int totalMasks = (D.degree[candidate]+31)/32;
             for(int j =0; j < totalMasks; j++){
                 levelData.validNeighMask[(writeOffset+i)*maxBitMask + j ] = 
-                levelData.validNeighMaskPartition[maskPartition + (levelData.offsetPartition[offsetPartition + iter] + i)*maxBitMask + j]
+                levelData.validNeighMaskPartition[maskPartition + (levelData.offsetPartition[offsetPartition + iter] + i)*maxBitMask + j];
             }
 
         }
 
-        __syncWarp();
+        __syncwarp();
 
         if(laneId==0){
             levelData.offset[levelData.count[warpId] + iter] = levelData.temp[warpId]+levelData.offsetPartition[offsetPartition + iter+ 1];
@@ -186,6 +191,7 @@ __global__ void flushParitions(deviceDAGpointer D, cliqueLevelDataPointer levelD
     }
 
 }
+
 
 
 __global__ void listMidCliques(deviceDAGpointer D, cliqueLevelDataPointer levelData, ui *label, ui k,ui iterK, ui n, ui m,ui psize, ui cpSize, ui maxBitMask,ui totalTasks, ui level, ui totalWarps){
