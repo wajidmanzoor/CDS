@@ -93,15 +93,18 @@ int main(int argc, const char * argv[]) {
 
     createLevelDataOffset(levelData, offsetPartitionSize, TOTAL_WARPS);
     
-    //Tested
 
+    createLevelDataOffset(levelData, offsetPartitionSize, TOTAL_WARPS);
 
-    flushParitions<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, pSize, cpSize, maxBitMask, level, TOTAL_WARPS);
+    flushParitions<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, pSize,cpSize,k, maxBitMask, level, TOTAL_WARPS);
     CUDA_CHECK_ERROR("Flush Partition data structure");
 
     int totalTasks;
-    chkerr(cudaMemcpy(&totalTasks, levelData->count + TOTAL_WARPS, sizeof(ui), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(&totalTasks, levelData.count + TOTAL_WARPS, sizeof(ui), cudaMemcpyDeviceToHost));
 
+    //Tested
+    
+    
     while(iterK > 2) {
         thrust::fill(dev_labels, dev_labels + G.n, iterK);
         listMidCliques<<<BLK_NUMS, BLK_DIM>>>(*deviceDAG, *levelData, labels, k, iterK, G.n, G.m, pSize, cpSize, maxBitMask, totalTasks, level, TOTAL_WARPS);
