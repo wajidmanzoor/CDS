@@ -45,7 +45,7 @@ inline void createLevelDataOffset(cliqueLevelDataPointer levelData, ui offsetPar
         thrust::make_counting_iterator(static_cast<int>(totalWarps)), // End iterator (int)
         levelData.temp + 1, // Output iterator (ui*)
         [=] __device__ (int i) -> ui { // Lambda with explicit return type (ui)
-            int task_count = levelData.count[i];
+            int task_count = levelData.count[i+1];
             return (task_count > 0) ? levelData.offsetPartition[i * offsetPartitionSize + task_count] : 0;
         }
     );

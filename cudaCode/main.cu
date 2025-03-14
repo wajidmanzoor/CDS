@@ -81,7 +81,6 @@ int main(int argc, const char * argv[]) {
 
     chkerr(cudaMemcpy(deviceGraph.degree, graph.degree.data(), graph.n * sizeof(ui), cudaMemcpyHostToDevice));
 
-    //Tested
 
 
     size_t sharedMemoryIntialClique =  WARPS_EACH_BLK * sizeof(ui);
@@ -94,7 +93,10 @@ int main(int argc, const char * argv[]) {
 
     createLevelDataOffset(levelData, offsetPartitionSize, TOTAL_WARPS);
     
-    flushParitions<<<BLK_NUMS, BLK_DIM>>>(*deviceDAG, *levelData, pSize, cpSize, maxBitMask, level, TOTAL_WARPS);
+    //Tested
+
+
+    flushParitions<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, pSize, cpSize, maxBitMask, level, TOTAL_WARPS);
     CUDA_CHECK_ERROR("Flush Partition data structure");
 
     int totalTasks;
