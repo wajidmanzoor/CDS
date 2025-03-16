@@ -78,6 +78,7 @@ __global__ void listIntialCliques(deviceDAGpointer D, cliqueLevelDataPointer lev
     int candidatePartition = warpId * cpSize;
     int maskPartition = warpId * cpSize * maxBitMask;
 
+
     for(int i = warpId; i < n; i += totalWarps) {
 
         ui vertex = i;
@@ -87,64 +88,73 @@ __global__ void listIntialCliques(deviceDAGpointer D, cliqueLevelDataPointer lev
         }
 
         __syncwarp();
+
         int candidateOffset = candidatePartition + levelData.offsetPartition[offsetPartition + levelData.count[warpId + 1]];
-        
+
 
         for(int j = laneId; j < D.degree[vertex]; j += warpSize) {
             ui neigh = D.neighbors[neighOffset + j];
+            //printf("warp %d lane %i vertex %d neighoff %d canoff %d neigh %d label %d \n",i,j,vertex, neighOffset,candidateOffset,neigh,label[warpId*n + neigh]);
             if(label[warpId*n + neigh] == k) {
                 label[warpId*n + neigh] = k - 1;
+                //printf("WarpId %d laneId %d candidate %d num neigh %d neigh %d label %d \n", warpId,laneId,vertex,D.degree[vertex],neigh,label[warpId*n + neigh]);
                 ui loc = atomicAdd(&counter[threadIdx.x / warpSize], 1);
                 levelData.candidatesPartition[candidateOffset + loc] = neigh;
             }
         }
         __syncwarp();
         if(laneId == 0 && counter[threadIdx.x / warpSize] > 0) {
+            //printf("warp %d counter %d cliquePart %d leveldataC %d vertex %d \n",i,counter[threadIdx.x / warpSize], cliquePartition, levelData.count[warpId + 1], vertex);
             levelData.partialCliquesPartition[cliquePartition + levelData.count[warpId + 1] * (k-1) + level] = vertex;
             levelData.count[warpId + 1] += 1;
             levelData.offsetPartition[offsetPartition + levelData.count[warpId + 1]] =
                 levelData.offsetPartition[offsetPartition + levelData.count[warpId + 1] - 1] + counter[threadIdx.x / warpSize];
         }
          __syncwarp();
-        for(int i = laneId; i<n;i+=32){
-          label[warpId*n + i] = k;
-        }
-    }
 
-    __syncwarp();
-
-    int totalTasks = levelData.count[warpId + 1];
-
-    for(int iter = 0; iter < totalTasks; iter++) {
-        int start = candidatePartition + levelData.offsetPartition[offsetPartition + iter];
-        int end = candidatePartition + levelData.offsetPartition[offsetPartition + iter + 1];
-        int total = end - start;
-        for(int i = laneId; i < total; i += warpSize) {
-            int candidate = levelData.candidatesPartition[start + i];
+        int start = candidateOffset;
+        //int end = candidateOffset + counter[threadIdx.x / warpSize];
+        //printf("warp %d lane Id %d start %d end %d total %d \n", warpId, laneId, start, end, counter[threadIdx.x / warpSize]);
+        for(int j = laneId; j < counter[threadIdx.x / warpSize]; j += warpSize) {
+            int candidate = levelData.candidatesPartition[start + j];
             int neighOffset = D.offset[candidate];
             int degree = D.degree[candidate];
 
             int numBitmasks = (degree + 31) / 32;
 
             for (int bitmaskIndex = 0; bitmaskIndex < numBitmasks; bitmaskIndex++) {
-                unsigned int bitmask = 0; // Initialize bitmask to 0
+                ui bitmask = 0; // Initialize bitmask to 0
 
                 // Iterate over the current chunk of 32 neighbors
                 int startNeighbor = bitmaskIndex * 32;
                 int endNeighbor = min(startNeighbor + 32, degree);
-                for (int j = startNeighbor; j < endNeighbor; j++) {
-                    if (label[warpId*n + D.neighbors[neighOffset + j]] == k - 1) {
-                        bitmask |= (1 << (j - startNeighbor)); // Set the bit for valid neighbors
+                for (int x = startNeighbor; x < endNeighbor; x++) {
+
+
+                    if (label[warpId*n + D.neighbors[neighOffset + x]] == k - 1) {
+                        bitmask |= (1 << (x - startNeighbor)); // Set the bit for valid neighbors
+
+
                     }
                 }
 
-                levelData.validNeighMaskPartition[maskPartition + (levelData.offsetPartition[offsetPartition + iter] + i) * maxBitMask + bitmaskIndex] = bitmask;
+                //printf("WarpId %d laneId %d candidate %d num neigh %d   mask part %d count %d offset loc %d offset %d max bit %d  bitIndex %d loc %d  bitmask %d \n", warpId,laneId,candidate,degree,maskPartition,levelData.count[warpId + 1],offsetPartition + levelData.count[warpId + 1] -1,levelData.offsetPartition[offsetPartition + levelData.count[warpId + 1] -1 ],maxBitMask,bitmaskIndex,maskPartition + (levelData.offsetPartition[offsetPartition + levelData.count[warpId + 1]-1]+j) * maxBitMask + bitmaskIndex,bitmask);
+
+
+                levelData.validNeighMaskPartition[maskPartition + (levelData.offsetPartition[offsetPartition + levelData.count[warpId + 1]-1]+j) * maxBitMask + bitmaskIndex] = bitmask;
             }
         }
-    }
-   
-}
 
+        __syncwarp();
+
+        for(int i = laneId; i<n;i+=32){
+          label[warpId*n + i] = k;
+        }
+
+       __syncwarp();
+    }
+
+}
 
 __global__ void flushParitions(deviceDAGpointer D, cliqueLevelDataPointer levelData, ui pSize, ui cpSize, ui k, ui maxBitMask, ui level, ui totalWarps){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -168,13 +178,13 @@ __global__ void flushParitions(deviceDAGpointer D, cliqueLevelDataPointer levelD
            ui candidate = levelData.candidatesPartition[start + i];
             levelData.candidates[writeOffset+ i] = levelData.candidatesPartition[start + i];
             if(i< level){
-          
+
                 levelData.partialCliques[levelData.count[warpId]*(k-1)+ iter*(k-1) + i] = levelData.partialCliquesPartition[cliquePartition + iter * (k-1) + i];
-                printf("warp Id %d lane id %d count %d iter % d pclique %d level %d write loc %d \n",warpId,i,levelData.count[warpId],iter,levelData.partialCliquesPartition[cliquePartition + iter * (k-1) + i],i,levelData.count[warpId]+ iter*(k-1) + i);
+                //printf("warp Id %d lane id %d count %d iter % d pclique %d level %d write loc %d \n",warpId,i,levelData.count[warpId],iter,levelData.partialCliquesPartition[cliquePartition + iter * (k-1) + i],i,levelData.count[warpId]+ iter*(k-1) + i);
             }
             int totalMasks = (D.degree[candidate]+31)/32;
             for(int j =0; j < totalMasks; j++){
-                levelData.validNeighMask[(writeOffset+i)*maxBitMask + j ] = 
+                levelData.validNeighMask[(writeOffset+i)*maxBitMask + j ] =
                 levelData.validNeighMaskPartition[maskPartition + (levelData.offsetPartition[offsetPartition + iter] + i)*maxBitMask + j];
             }
 
