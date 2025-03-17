@@ -10,7 +10,7 @@ void memoryAllocationDAG(deviceDAGpointer &D, ui n, ui m);
 //void memoryAllocationMotif(deviceMotifPointers &M, Motif &motif);
 void memoryAllocationComponent(deviceComponentPointers &C, ui n, ui m);
 void memoryAllocationresult(deviceResultpointer &R, ui n);
-void memeoryAllocationTrie(deviceCliquesPointer &C, ui t, ui k);
+void memoryAllocationTrie(deviceCliquesPointer &C, ui t, ui k);
 ui memoryAllocationlevelData(cliqueLevelDataPointer &L, ui k, ui pSize, ui cpSize, ui maxDegree, ui totalWarps);
 
 // Function declarations for memory deallocation

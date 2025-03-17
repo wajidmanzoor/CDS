@@ -1,8 +1,9 @@
 #include "./inc/common.h"
 #include "./inc/graph.h"
-#include "./inc/motif.h"
 
 #include "./utils/cuda_utils.cuh"
+#include "./inc/gpuMemoryAllocation.cuh"
+#include "./inc/helpers.cuh"
 
 int main(int argc, const char * argv[]) {
     if (argc != 6) {
@@ -33,8 +34,6 @@ int main(int argc, const char * argv[]) {
     chkerr(cudaMalloc((void**)&(listOrder), graph.n * sizeof(ui)));
     chkerr(cudaMemcpy(listOrder, listingOrder.data(), graph.n * sizeof(ui), cudaMemcpyHostToDevice));
 
-
-
     // Get out degree in DAG
     generateDegreeDAG<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, deviceDAG, listOrder, graph.n, graph.m, TOTAL_WARPS);
     cudaDeviceSynchronize();
@@ -64,36 +63,31 @@ int main(int argc, const char * argv[]) {
 
 
     auto max_iter = thrust::max_element(dev_degree, dev_degree + graph.n);
-
     int maxDegree = *max_iter;
 
-    cout<<"max deg "<<maxDegree<<endl;
     ui maxBitMask = memoryAllocationlevelData(levelData, k, pSize, cpSize, maxDegree, TOTAL_WARPS);
 
-    cout<<"max bits "<<maxBitMask<<endl;
     int level = 0;
     int iterK = k;
 
     ui *labels;
     chkerr(cudaMalloc((void**)&(labels), (graph.n * TOTAL_WARPS) * sizeof(ui)));
     thrust::device_ptr<ui> dev_labels(labels);
-    thrust::fill(dev_labels, dev_labels + graph.n, iterK);
+    thrust::fill(dev_labels, dev_labels + graph.n*TOTAL_WARPS, iterK);
 
     chkerr(cudaMemcpy(deviceGraph.degree, graph.degree.data(), graph.n * sizeof(ui), cudaMemcpyHostToDevice));
     chkerr(cudaMemset(levelData.partialCliquesPartition, 0,  (TOTAL_WARPS * pSize)* sizeof(ui)));
 
-
-
     size_t sharedMemoryIntialClique =  WARPS_EACH_BLK * sizeof(ui);
-    listIntialCliques<<<1, 64,sharedMemoryIntialClique>>>(deviceDAG, levelData, labels, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, level, TOTAL_WARPS);
+    listIntialCliques<<<BLK_NUMS, BLK_DIM,sharedMemoryIntialClique>>>(deviceDAG, levelData, labels, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, level, TOTAL_WARPS);
     CUDA_CHECK_ERROR("Generate Intial Partial Cliques");
+    ui partialSize = TOTAL_WARPS * pSize;
+    ui candidateSize = TOTAL_WARPS * cpSize;
+    ui offsetSize = ((pSize / (k - 1)) + 1) * TOTAL_WARPS;
 
   
     ui offsetPartitionSize = ((pSize / (k-1)) + 1);
-
-    
     createLevelDataOffset(levelData, offsetPartitionSize, TOTAL_WARPS);
-
 
     flushParitions<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, pSize,cpSize,k, maxBitMask, level, TOTAL_WARPS);
     CUDA_CHECK_ERROR("Flush Partition data structure");
@@ -104,9 +98,6 @@ int main(int argc, const char * argv[]) {
     int totalTasks;
     chkerr(cudaMemcpy(&totalTasks, levelData.count + TOTAL_WARPS, sizeof(ui), cudaMemcpyDeviceToHost));
     size_t sharedMemoryMid =  WARPS_EACH_BLK * sizeof(ui);
-
-    //Tested
-    
 
     while(iterK > 2) {
         thrust::device_ptr<ui> dev_labels(labels);
@@ -129,31 +120,69 @@ int main(int argc, const char * argv[]) {
 
         iterK--;
         level++;
-
     }
 
-    ui t;
-    //TODO: decide the total number cliques
-    chkerr(cudaFree(labels));
-    freeLevelPartitionData(levelData);
-    
-    memoryAllocationTrie(*cliqueData, t, k);
-    int totalCliques;
+    ui t = 10; // Make it ud
+    //TODO: decide the total number cliques and Free Level Data p 1
+    chkerr(cudaFree(labels));    
+    memoryAllocationTrie(cliqueData, t, k);
 
+    ui *totalCliques;
     chkerr(cudaMalloc((void**)&totalCliques, sizeof(ui)));
     chkerr(cudaMemset(totalCliques, 0, sizeof(ui)));
+    size_t sharedMemoryFinal =  WARPS_EACH_BLK * sizeof(ui);
 
+
+    chkerr(cudaMemset(cliqueData.status, 0, t * sizeof(ui)));
+    chkerr(cudaMemset(cliqueData.trie, 0, t * k * sizeof(ui)));
     if(iterK == 2) {
-        writeFinalCliques<<<BLK_NUMS, BLK_DIM>>>(*deviceGraph, *deviceDAG, *levelData, *cliqueData, totalCliques, k, iterK, G.n, G.m, pSize, cpSize, maxBitMask, totalTasks, level, TOTAL_WARPS);
+        writeFinalCliques<<<BLK_NUMS, BLK_DIM,sharedMemoryFinal>>>(deviceGraph, deviceDAG, levelData, cliqueData, totalCliques, k, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, t,totalTasks, level, TOTAL_WARPS);
         CUDA_CHECK_ERROR("Generate Full Cliques");
     }
 
-    freeLevelData(*levelData);
 
-    sortTrieData<<<BLK_NUMS, BLK_DIM>>>(*deviceGraph, *cliqueData, totalCliques, k, TOTAL_THREAD);
-    CUDA_CHECK_ERROR("Sort Trie Data Structure");
+    freeLevelData(levelData);
+    freeLevelPartitionData(levelData);
 
-    freeDAG(*deviceDAG);
+    int *h_cliques,*status;
+    h_cliques = new int[t*k];
+    status = new int[t];
+    chkerr(cudaMemcpy(h_cliques, cliqueData.trie, k * t * sizeof(ui), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(status, cliqueData.status, t * sizeof(ui), cudaMemcpyDeviceToHost));
+    cout<<endl;
+    for(int i =0;i<k;i++){
+      cout<<endl<<"CL "<<i<<"  ";
+      for(int j =0;j<t;j++){
+        cout<<h_cliques[i*t+j]<<" ";
+      }
+    }
+    cout<<endl<<"stat  ";
+    for(int i = 0; i < t; i++) {
+        cout << status[i] << " ";
+
+    }
+
+    ui *h_cdegree;
+    h_cdegree = new ui[graph.n];
+    chkerr(cudaMemcpy(h_cdegree, deviceGraph.cliqueDegree, graph.n* sizeof(ui), cudaMemcpyDeviceToHost));
+    cout<<endl;
+    for(int i = 0; i < graph.n; i++) {
+        cout <<i<<" ";
+    } 
+    cout<<endl;
+    for(int i = 0; i < graph.n; i++) {
+        cout << h_cdegree[i] << " ";
+    }
+
+    ui tt;
+    chkerr(cudaMemcpy(&tt, totalCliques, sizeof(ui), cudaMemcpyDeviceToHost));
+    cout<<endl<<"total cliques "<<tt<<endl;
+
+
+    //sortTrieData<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData, totalCliques, k, TOTAL_THREAD);
+    //CUDA_CHECK_ERROR("Sort Trie Data Structure");
+
+    freeDAG(deviceDAG);
 
     // TODO: reorder Trie by motif degree
 
@@ -169,10 +198,6 @@ int main(int argc, const char * argv[]) {
 
     //TODO: DYNAMIC CORE EXACT
 
-    freeGraph(*deviceGraph);
-    delete deviceGraph;
-    delete deviceDAG;
-    delete levelData;
-    delete cliqueData;
+    freeGraph(deviceGraph);
     return 0;
 }

@@ -1,7 +1,9 @@
 #include "../utils/cuda_utils.cuh"
 #include "../inc/helpers.cuh"
 
-
+//TODO: remove unused variables 
+//TODO: Make code a bit more structured and clean
+//TODO: Try to find more ways to optimize
 
 __global__ void generateDegreeDAG(deviceGraphPointers G, deviceDAGpointer D, ui *listingOrder, ui n, ui m, ui totalWarps) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -312,3 +314,115 @@ __global__ void listMidCliques(deviceDAGpointer D, cliqueLevelDataPointer levelD
     }
     
 }
+
+
+__global__ void writeFinalCliques(deviceGraphPointers G, deviceDAGpointer D, cliqueLevelDataPointer levelData, deviceCliquesPointer cliqueData, ui *globalCounter,ui k,ui iterK, ui n, ui m,ui pSize, ui cpSize, ui maxBitMask,ui trieSize,ui totalTasks, ui level, ui totalWarps){
+    extern __shared__ char sharedMemory[];
+    ui sizeOffset = 0;
+
+    ui *counter = (ui * )(sharedMemory + sizeOffset);
+    
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int warpId = idx / warpSize;
+    int laneId = idx % warpSize;
+    int cliquePartition  = warpId*pSize;
+    int offsetPartition = warpId*(pSize/(k-1)+1);
+    int candidatePartition = warpId*cpSize;
+    int maskPartition = warpId*cpSize*maxBitMask; 
+
+    
+    for(int i =warpId; i < totalTasks ; i+= totalWarps ){
+
+        int start = levelData.offset[i];
+        int totalCandidates = levelData.offset[i+1]- start;
+        //printf("warp %d start %d total %d\n", warpId, start, totalCandidates);
+
+        for(int iter = 0; iter <totalCandidates; iter ++){
+            int candidate = levelData.candidates[start + iter];
+            if(laneId==0){
+                counter[warpId]=0;
+            }
+            int degree = D.degree[candidate];
+            int neighOffset = D.offset[candidate];
+            //printf("---warp %d start %d iter %d cand %d \n", warpId, start, iter,candidate);
+
+            
+            for(int j = laneId; j< degree; j+= warpSize ){
+                int iterBitMask = j/warpSize;
+                int bitPos = j%32;
+                int neighBitMask = levelData.validNeighMask[start*maxBitMask + iter + iterBitMask];
+                if(neighBitMask & (1 << bitPos )){
+
+                    ui neigh = D.neighbors[neighOffset + j];
+                  
+                    ui loc = atomicAdd(globalCounter,1);
+                    for(int ind =0; ind < k-2; ind++){
+                        cliqueData.trie[trieSize * ind + loc] = levelData.partialCliques[(i)*(k-1) + ind];
+                        
+                    }
+                    atomicAdd(&counter[warpId],1);
+                    cliqueData.trie[trieSize * (k-2) + loc]  = candidate;
+                    cliqueData.trie[trieSize * (k-1) + loc] = neigh;
+                    cliqueData.status[loc]=1;
+                    atomicAdd(&G.cliqueDegree[neigh],1);
+                    atomicAdd(&G.cliqueDegree[candidate],1);
+
+                }
+                
+    
+            }
+            __syncwarp();
+
+            for(int j = laneId; j< k-2 ; j+= warpSize ){
+                int pClique = levelData.partialCliques[i*(k-1) + j];
+                atomicAdd(&G.cliqueDegree[pClique],counter[warpId]);
+            }
+
+        }        
+    }
+
+}
+
+__global__ void sortTrieData(deviceGraphPointers G, deviceCliquesPointer cliqueData, ui t, ui k, ui totalThreads){
+
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+
+    /*for(int i = idx; i <t; i+=totalThreads ){
+        ui elements[k];
+        ui degree[k];
+        for(int j=0;j<k;j++){
+            elements[j] = cliqueData.trie[j*t+i];
+            degree[j] = G.cliqueDegree[element];
+        }
+
+        // Use insertion sort, as it is best for small arrays 
+
+        for(j=1;j<k;j++){
+            ui insert_index = j;
+            int current_element = elements[j];
+            int current_degree = degree[current_element];
+            ui current = degree[element[j]];
+            for(int ind = j-1; ind>=0; ind-- ){
+                if(degree[elements[ind]] > ){current_degree
+                    elements[ind+1] = elements[ind];
+                    insert_index = ind;
+
+                }else{
+                    break;
+                }
+
+            }
+            elements[insert_index] = current_element;
+
+        }
+
+        for(int j=0;j<k;j++){
+            cliqueData.trie[j*t+i] = elements[j];
+    
+        }
+
+    }*/
+
+}
+
