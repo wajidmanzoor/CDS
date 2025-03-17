@@ -82,7 +82,7 @@ int main(int argc, const char * argv[]) {
     listIntialCliques<<<BLK_NUMS, BLK_DIM,sharedMemoryIntialClique>>>(deviceDAG, levelData, labels, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, level, TOTAL_WARPS);
     CUDA_CHECK_ERROR("Generate Intial Partial Cliques");
     ui partialSize = TOTAL_WARPS * pSize;
-    ui candidateSize = TOTAL_WARPS * cpSize;
+    //ui candidateSize = TOTAL_WARPS * cpSize;
     ui offsetSize = ((pSize / (k - 1)) + 1) * TOTAL_WARPS;
 
   
