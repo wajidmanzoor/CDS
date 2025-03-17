@@ -325,10 +325,6 @@ __global__ void writeFinalCliques(deviceGraphPointers G, deviceDAGpointer D, cli
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
-    int cliquePartition  = warpId*pSize;
-    int offsetPartition = warpId*(pSize/(k-1)+1);
-    int candidatePartition = warpId*cpSize;
-    int maskPartition = warpId*cpSize*maxBitMask; 
 
     
     for(int i =warpId; i < totalTasks ; i+= totalWarps ){
@@ -383,46 +379,57 @@ __global__ void writeFinalCliques(deviceGraphPointers G, deviceDAGpointer D, cli
 
 }
 
-__global__ void sortTrieData(deviceGraphPointers G, deviceCliquesPointer cliqueData, ui t, ui k, ui totalThreads){
+
+__global__ void sortTrieData(deviceGraphPointers G, deviceCliquesPointer cliqueData, ui totalCliques, ui t, ui k, ui totalThreads){
+    extern __shared__ char sharedMemory[];
+    ui sizeOffset = 0;
+
+    ui *elements = (ui * )(sharedMemory + sizeOffset);
+    sizeOffset = k*WARPS_EACH_BLK*sizeof(ui);
+    ui *degree = (ui * )(sharedMemory + sizeOffset);
+
 
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
 
-    /*for(int i = idx; i <t; i+=totalThreads ){
-        ui elements[k];
-        ui degree[k];
+    for(int i = idx; i <totalCliques; i+=totalThreads ){
+
+        printf("idx %d \n", idx);
         for(int j=0;j<k;j++){
+            
             elements[j] = cliqueData.trie[j*t+i];
-            degree[j] = G.cliqueDegree[element];
+            degree[j] = G.cliqueDegree[elements[j]];
+            //printf("idx %d j %d loc element %d element %d degree %d \n",idx,j,j*t+i,elements[j],degree[j]);
         }
+
+        __syncwarp();
 
         // Use insertion sort, as it is best for small arrays 
 
-        for(j=1;j<k;j++){
-            ui insert_index = j;
-            int current_element = elements[j];
-            int current_degree = degree[current_element];
-            ui current = degree[element[j]];
-            for(int ind = j-1; ind>=0; ind-- ){
-                if(degree[elements[ind]] > ){current_degree
-                    elements[ind+1] = elements[ind];
-                    insert_index = ind;
+        for(int j=1;j<k;j++){
+            ui current_element = elements[j];
+            ui current_degree = degree[j];
+            int ind = j-1;
 
-                }else{
-                    break;
-                }
-
+            while(ind >= 0 && degree[ind] > current_degree){
+                elements[ind + 1] = elements[ind];
+                degree[ind + 1] = degree[ind];
+                ind--;
             }
-            elements[insert_index] = current_element;
+            elements[ind + 1] = current_element;
+            degree[ind + 1] = current_degree;
 
         }
 
         for(int j=0;j<k;j++){
             cliqueData.trie[j*t+i] = elements[j];
+            //printf("idx %d j %d loc element %d element %d \n",idx,j,j*t+i,elements[j]);
     
         }
 
-    }*/
+    }
 
 }
+
+
 
