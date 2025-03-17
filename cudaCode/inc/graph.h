@@ -21,6 +21,7 @@ class Graph {
     std::string filePath;
   
   public:
+  
     Graph();
     Graph(std::string path);
     void getListingOrder(std::vector<ui>& arr);

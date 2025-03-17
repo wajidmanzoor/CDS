@@ -28,9 +28,8 @@
 #include <sys/stat.h>
 #include <mutex>
 
-
-#define BLK_NUMS 432
-#define BLK_DIM 512
+#define BLK_NUMS 1
+#define BLK_DIM 64
 #define TOTAL_THREAD (BLK_NUMS*BLK_DIM)
 #define WARPSIZE 32
 #define WARPS_EACH_BLK (BLK_DIM/32)
