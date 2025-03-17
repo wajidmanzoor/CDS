@@ -96,6 +96,9 @@ ui memoryAllocationlevelData(cliqueLevelDataPointer &L, ui k, ui pSize, ui cpSiz
     chkerr(cudaMalloc((void**)&(L.validNeighMaskPartition), maskSize * sizeof(ui)));
     chkerr(cudaMalloc((void**)&(L.validNeighMask), maskSize * sizeof(ui)));
 
+    chkerr(cudaMemset(L.validNeighMask, 0, maskSize * sizeof(ui)));
+    chkerr(cudaMemset(L.validNeighMaskPartition, 0, maskSize * sizeof(ui)));
+
     chkerr(cudaMalloc((void**)&(L.offsetPartition), offsetSize * sizeof(ui)));
     chkerr(cudaMemset(L.offsetPartition, 0, offsetSize * sizeof(ui)));
 
