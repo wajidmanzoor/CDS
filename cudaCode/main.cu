@@ -143,6 +143,15 @@ int main(int argc, const char * argv[]) {
 
     freeLevelData(levelData);
     freeLevelPartitionData(levelData);
+    freeDAG(deviceDAG);
+
+    ui tt;
+    chkerr(cudaMemcpy(&tt, totalCliques, sizeof(ui), cudaMemcpyDeviceToHost));
+    cout<<endl<<"total cliques "<<tt<<endl;
+
+    size_t sharedMemorySort =  2*k*WARPS_EACH_BLK * sizeof(ui);
+    sortTrieData<<<1, 64,sharedMemorySort>>>(deviceGraph, cliqueData, tt,t, k, TOTAL_THREAD);
+    CUDA_CHECK_ERROR("Sort Trie Data Structure");
 
     int *h_cliques,*status;
     h_cliques = new int[t*k];
@@ -174,15 +183,6 @@ int main(int argc, const char * argv[]) {
         cout << h_cdegree[i] << " ";
     }
 
-    ui tt;
-    chkerr(cudaMemcpy(&tt, totalCliques, sizeof(ui), cudaMemcpyDeviceToHost));
-    cout<<endl<<"total cliques "<<tt<<endl;
-
-
-    //sortTrieData<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData, totalCliques, k, TOTAL_THREAD);
-    //CUDA_CHECK_ERROR("Sort Trie Data Structure");
-
-    freeDAG(deviceDAG);
 
     // TODO: reorder Trie by motif degree
 
@@ -197,7 +197,7 @@ int main(int argc, const char * argv[]) {
     //TODO: COMPONENT DECOMPOSE
 
     //TODO: DYNAMIC CORE EXACT
-
+    freTrie(cliqueData);
     freeGraph(deviceGraph);
     return 0;
 }
