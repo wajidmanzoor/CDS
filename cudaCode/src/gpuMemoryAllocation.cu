@@ -15,6 +15,8 @@ void memoryAllocationGraph(deviceGraphPointers &G, Graph &graph) {
     chkerr(cudaMemcpy(G.degree, graph.degree.data(), n * sizeof(ui), cudaMemcpyHostToDevice));
 
     chkerr(cudaMalloc((void**)&(G.cliqueDegree), n * sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(G.cliqueCore), n * sizeof(int)));
+
     chkerr(cudaMalloc((void**)&(G.cliqueCorePeelSequence), n * sizeof(ui)));
     chkerr(cudaMalloc((void**)&(G.density), n * sizeof(double)));
     chkerr(cudaMalloc((void**)&(G.motifCount), n * sizeof(ui)));
