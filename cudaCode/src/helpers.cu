@@ -449,7 +449,7 @@ __global__ void selectNodes(deviceGraphPointers G, ui *bufTails,ui *glBuffers, u
     __shared__ ui *glBuffer; 
     __shared__ ui bufTail; 
     
-    if(THID == 0){
+    if(threadIdx.x == 0){
         bufTail = 0;
         glBuffer = glBuffers + blockIdx.x*glBufferSize;
     }
@@ -470,7 +470,7 @@ __global__ void selectNodes(deviceGraphPointers G, ui *bufTails,ui *glBuffers, u
 
     __syncthreads();
 
-    if(THID == 0) 
+    if(threadIdx.x == 0) 
     {
         bufTails [blockIdx.x] = bufTail;
     }
@@ -481,11 +481,11 @@ __global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cl
     __shared__ ui bufTail;
     __shared__ ui *glBuffer;
     __shared__ ui base;
-    ui warpId = THID / 32;
-    ui laneId = THID % 32;
+    ui warpId = threadIdx.x / 32;
+    ui laneId = threadIdx.x % 32;
     ui regTail;
     ui i;
-    if(THID==0){
+    if(threadIdx.x==0){
     bufTail = bufTails[blockIdx.x];
     base = 0;
     glBuffer = glBuffers + blockIdx.x*GLBUFFER_SIZE; 
@@ -501,7 +501,7 @@ __global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cl
 
     if(i >= regTail) continue; // this warp won't have to do anything            
 
-    if(THID == 0){
+    if(threadIdx.x == 0){
     base += WARPS_EACH_BLK;
     if(regTail < base )
     base = regTail;
@@ -533,7 +533,7 @@ __global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cl
     }
     
 
-    if(THID == 0 && bufTail>0){
+    if(threadIdx.x == 0 && bufTail>0){
     atomicAdd(globalCount, bufTail); // atomic since contention among blocks
     }
 }
@@ -543,11 +543,11 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
     __shared__ ui bufTail;
     __shared__ ui *glBuffer;
     __shared__ ui base;
-    ui warpId = THID / 32;
-    ui laneId = THID % 32;
+    ui warpId = threadIdx.x / 32;
+    ui laneId = threadIdx.x % 32;
     ui regTail;
     ui i;
-    if(THID==0){
+    if(threadIdx.x==0){
     bufTail = bufTails[blockIdx.x];
     base = 0;
     glBuffer = glBuffers + blockIdx.x*GLBUFFER_SIZE; 
@@ -563,7 +563,7 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
 
     if(i >= regTail) continue; // this warp won't have to do anything            
 
-    if(THID == 0){
+    if(threadIdx.x == 0){
     base += 1;
     if(regTail < base )
     base = regTail;
@@ -596,7 +596,7 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
     }
     
 
-    if(THID == 0 && bufTail>0){
+    if(threadIdx.x == 0 && bufTail>0){
     atomicAdd(globalCount, bufTail); // atomic since contention among blocks
     }
 }
