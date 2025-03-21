@@ -10,7 +10,7 @@ __device__ inline void writeToBuffer(ui *glBuffer, ui loc, ui v, ui bufferSize){
     glBuffer[loc] = v;
 }
 
-__device__ inline ui readFromBuffer(ui* glBuffer, ui loc,, ui bufferSize){
+__device__ inline ui readFromBuffer(ui* glBuffer, ui loc, ui bufferSize){
     assert(loc < bufferSize);
     return glBuffer[loc];
 }
@@ -456,28 +456,31 @@ __global__ void selectNodes(deviceGraphPointers G, ui *bufTails,ui *glBuffers, u
     __syncthreads();
 
     ui idx = blockIdx.x * blockDim.x + threadIdx.x; 
-    for(ui base = 0; base < n; base += BLK_DIM){
-        
-        ui v = base + idx; 
+    for(ui i = idx ;i<n; i+=BLK_DIM){
+      ui v = i;
+      if(G.cliqueCore[v] == level){
+        ui loc = atomicAdd(&bufTail, 1);
+        printf("idx %d block %d v %d core %d loc %d size %d bDim %d \n", idx,blockIdx.x,v,G.cliqueCore[v],loc,glBufferSize, BLK_DIM);
+        glBuffer[loc] = v;
+        printf("idx %d block %d v %d core %d loc %d size %d wrote %d \n", idx,blockIdx.x,v,G.cliqueCore[v],loc,glBufferSize,glBuffer[loc]);
 
-        if(v >= n) continue;
 
-        if(G.cliqueCore[v] == level){
-            ui loc = atomicAdd(&bufTail, 1);
-            writeToBuffer(glBuffer, loc, v,glBufferSize);
         }
+
     }
+
 
     __syncthreads();
 
     if(threadIdx.x == 0) 
     {
+        printf("idx %d block %d bufTail %d \n", idx,blockIdx.x,bufTail);
         bufTails [blockIdx.x] = bufTail;
     }
 
 }
 
-__global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cliqueData, ui *bufTails,ui *glBuffers, ui *globalCount, ui glBufferSize, ui n, ui level, ui k){
+__global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cliqueData, ui *bufTails,ui *glBuffers, ui *globalCount, ui glBufferSize, ui n, ui level, ui k, ui t){
     __shared__ ui bufTail;
     __shared__ ui *glBuffer;
     __shared__ ui base;
@@ -488,14 +491,14 @@ __global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cl
     if(threadIdx.x==0){
     bufTail = bufTails[blockIdx.x];
     base = 0;
-    glBuffer = glBuffers + blockIdx.x*GLBUFFER_SIZE; 
+    glBuffer = glBuffers + blockIdx.x*glBufferSize; 
     assert(glBuffer!=NULL);
     }
 
     while(true){
     __syncthreads(); 
     if(base == bufTail) break; // all the threads will evaluate to true at same iteration
-    i = base + warp_id;
+    i = base + warpId;
     regTail = bufTail;
     __syncthreads();
 
@@ -507,39 +510,41 @@ __global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cl
     base = regTail;
     }
     //bufTail is incremented in the code below:
-    ui v = readFromBuffer(glBuffer, i,bufferSize);
+    ui v = glBuffer[i];
 
  
-    __syncwarp();
-    for(ui i =laneId; i<t; i+=warpSize){
+   __syncthreads();
+    for(ui j =laneId; j<t; j+=warpSize){
+    printf("warpId %d laneId %u vertex %u check %d \n",warpId,i,v,cliqueData.trie[j]);
 
-        if( (v = cliqueData.trie[i]) && (cliqueData.status[i]==1)){
-            for(ui j =1;j<k;j++){
-                ui u = cliqueData.trie[j*t+i];
-                int a = atomicSub(&G.cliqueCore[u]);
+        if( (v == cliqueData.trie[j]) && (cliqueData.status[j] ==1)){
+          printf("inside warpId %d laneId %u vertex %u check %d \n",warpId,i,v,cliqueData.trie[j]);
+
+            for(ui x =1;x<k;x++){
+                ui u = cliqueData.trie[x*t+i];
+                int a = atomicSub(&G.cliqueCore[u],1);
                 if(a == level+1){
                     ui loc = atomicAdd(&bufTail, 1);
+                    glBuffer[loc] = u;
             
-                    writeToBuffer(glBuffer, loc, u);
                 }
                 if(a <= level){ 
                     atomicAdd(&G.cliqueCore[u], 1);
                 }
             }
-            cliqueData.status[i]==0;
+            cliqueData.status[i] = 0;
             
             
         }
     }
     
-
+__syncthreads();
     if(threadIdx.x == 0 && bufTail>0){
     atomicAdd(globalCount, bufTail); // atomic since contention among blocks
     }
 }
 }
-
-__global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer cliqueData, ui *bufTails,ui *glBuffers, ui *globalCount, ui glBufferSize, ui n, ui level, ui k){
+__global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer cliqueData, ui *bufTails,ui *glBuffers, ui *globalCount, ui glBufferSize, ui n, ui level, ui k, ui t){
     __shared__ ui bufTail;
     __shared__ ui *glBuffer;
     __shared__ ui base;
@@ -550,7 +555,7 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
     if(threadIdx.x==0){
     bufTail = bufTails[blockIdx.x];
     base = 0;
-    glBuffer = glBuffers + blockIdx.x*GLBUFFER_SIZE; 
+    glBuffer = glBuffers + blockIdx.x*glBufferSize; 
     assert(glBuffer!=NULL);
     }
 
@@ -569,7 +574,7 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
     base = regTail;
     }
     //bufTail is incremented in the code below:
-    ui v = readFromBuffer(glBuffer, i,bufferSize);
+    ui v = glBuffer[i];
 
  
     __syncwarp();
@@ -578,17 +583,17 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
         if( (v = cliqueData.trie[i]) && (cliqueData.status[i]==1)){
             for(ui j =1;j<k;j++){
                 ui u = cliqueData.trie[j*t+i];
-                int a = atomicSub(&G.cliqueCore[u]);
+                int a = atomicSub(&G.cliqueCore[u], 1);
                 if(a == level+1){
                     ui loc = atomicAdd(&bufTail, 1);
+                    glBuffer[loc] = u;
             
-                    writeToBuffer(glBuffer, loc, u);
                 }
                 if(a <= level){ 
                     atomicAdd(&G.cliqueCore[u], 1);
                 }
             }
-            cliqueData.status[i]==0;
+            cliqueData.status[i] = 0;
             
             
         }
