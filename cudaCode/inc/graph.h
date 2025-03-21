@@ -12,6 +12,7 @@ class Graph {
   public:
     ui n;
     ui m;
+    ui kmax;
 
     std::vector<ui> offset;
     std::vector<ui> neighbors;
