@@ -52,7 +52,7 @@ typedef struct  {
     ui *degree;
     ui *cliqueDegree;
     
-    ui *cliqueCore;
+    int *cliqueCore;
     ui *cliqueCorePeelSequence;
 
 
