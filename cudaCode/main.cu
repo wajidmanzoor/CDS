@@ -208,8 +208,8 @@ int main(int argc, const char * argv[]) {
         
         //Total number of verticies in buffer
         thrust::device_vector<ui> dev_vec(bufTails, bufTails + BLK_NUMS);
-        ui sum = thrust::reduce(dev_vec.begin(), dev_vec.end(), 0, thrust::plus<ui>());        
-
+        ui sum = thrust::reduce(dev_vec.begin(), dev_vec.end(), 0, thrust::plus<ui>());
+        
         //Bases on total vertices device to either use Warp or Block to process one vertex and its cliques
         if(sum > 2* BLK_NUMS){
             processNodesByWarp<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, , graph.n, level, k);
