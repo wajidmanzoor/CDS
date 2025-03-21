@@ -197,6 +197,8 @@ int main(int argc, const char * argv[]) {
     chkerr(cudaMalloc((void**)&(glBuffers), BLK_NUMS*glBufferSize*sizeof(ui)));
     chkerr(cudaMemset(globalCount, 0, sizeof(ui)));
     chkerr(cudaMalloc(&glBuffers,BLK_NUMS*glBufferSize*sizeof(ui)));
+    cudaDeviceSynchronize();
+
 //    chkerr(cudaMemset(glBuffers, 0, BLK_NUMS*glBufferSize*sizeof(ui)));
 
     chkerr(cudaMemcpy(deviceGraph.cliqueCore, deviceGraph.cliqueDegree, graph.n * sizeof(ui), cudaMemcpyDeviceToDevice));
@@ -205,14 +207,16 @@ int main(int argc, const char * argv[]) {
 
         // Select nodes whoes current degree is level, that means they should be removed as part of the level core 
         selectNodes<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, bufTails, glBuffers, glBufferSize, graph.n, level);
+        cudaDeviceSynchronize();
         
         //Total number of verticies in buffer
         thrust::device_vector<ui> dev_vec(bufTails, bufTails + BLK_NUMS);
         ui sum = thrust::reduce(dev_vec.begin(), dev_vec.end(), 0, thrust::plus<ui>());
-        
+
         //Bases on total vertices device to either use Warp or Block to process one vertex and its cliques
         if(sum > 2* BLK_NUMS){
-            processNodesByWarp<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, , graph.n, level, k);
+            processNodesByWarp<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, tt);
+            cudaDeviceSynchronize();
         }else{
             processNodesByBlock<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, , graph.n, level, k);
 
