@@ -6,7 +6,7 @@
 #include "./inc/helpers.cuh"
 
 int main(int argc, const char * argv[]) {
-    if (argc != 6) {
+    if (argc != 7) {
         cout << "Server wrong input parameters!" << endl;
         exit(1);
     }
@@ -16,6 +16,7 @@ int main(int argc, const char * argv[]) {
     ui k = atoi(argv[3]);
     ui pSize = atoi(argv[4]);
     ui cpSize = atoi(argv[5]);
+    ui glBufferSize = atoi(argv[6]);
 
     Graph graph = Graph(filepath);
 
@@ -183,10 +184,44 @@ int main(int argc, const char * argv[]) {
         cout << h_cdegree[i] << " ";
     }
 
-
-    // TODO: reorder Trie by motif degree
-
     //TODO:  CLIQUE CORE DECOMPOSE
+
+    level = 0;
+    ui count = 0;
+    ui *globalCount = NULL;
+    ui *bufTails  = NULL;
+    ui *glBuffers = NULL;
+
+    chkerr(cudaMalloc(&globalCount, sizeof(unsigned int)));
+    chkerr(cudaMalloc(&bufTails, sizeof(unsigned int)*BLK_NUMS));
+    cudaMemset(globalCount, 0, sizeof(unsigned int));
+    chkerr(cudaMalloc(&glBuffers,sizeof(unsigned int)*BLK_NUMS*glBufferSize));
+
+    chkerr(cudaMemcpy(deviceGraph.cliqueCore, deviceGraph.cliqueDegree, n * sizeof(ui), cudaMemcpyDeviceToDevice));
+
+    while(count < graph.n){
+        cudaMemset(bufTails, 0, sizeof(unsigned int)*BLK_NUMS);
+
+        // Select nodes whoes current degree is level, that means they should be removed as part of the level core 
+        selectNodes<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, bufTails, glBuffers, glBufferSize, graph.n, level);
+        
+        //Total number of verticies in buffer
+        thrust::device_vector<ui> dev_vec(bufTails, bufTails + BLK_NUMS);
+        ui sum = thrust::reduce(dev_vec.begin(), dev_vec.end(), 0, thrust::plus<ui>());        
+
+        //Bases on total vertices device to either use Warp or Block to process one vertex and its cliques
+        if(sum > 2* BLK_NUMS){
+            processNodesByWarp<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, , graph.n, level, k);
+        }else{
+            processNodesByBlock<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, , graph.n, level, k);
+
+        }
+
+        chkerr(cudaMemcpy(&count, globalCount, sizeof(unsigned int), cudaMemcpyDeviceToHost));    
+        level++;
+    }
+    graph.kmax = level-1;
+
 
     //TODO: LOCATE CORE
 
