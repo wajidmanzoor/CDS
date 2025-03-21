@@ -192,13 +192,14 @@ int main(int argc, const char * argv[]) {
     ui *bufTails  = NULL;
     ui *glBuffers = NULL;
 
-    chkerr(cudaMalloc(&globalCount, sizeof(unsigned int)));
-    chkerr(cudaMalloc(&bufTails, sizeof(unsigned int)*BLK_NUMS));
-    cudaMemset(globalCount, 0, sizeof(unsigned int));
-    chkerr(cudaMalloc(&glBuffers,sizeof(unsigned int)*BLK_NUMS*glBufferSize));
+    chkerr(cudaMalloc((void**)&(globalCount), sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(bufTails), BLK_NUMS*sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(glBuffers), BLK_NUMS*glBufferSize*sizeof(ui)));
+    chkerr(cudaMemset(globalCount, 0, sizeof(ui)));
+    chkerr(cudaMalloc(&glBuffers,BLK_NUMS*glBufferSize*sizeof(ui)));
+//    chkerr(cudaMemset(glBuffers, 0, BLK_NUMS*glBufferSize*sizeof(ui)));
 
-    chkerr(cudaMemcpy(deviceGraph.cliqueCore, deviceGraph.cliqueDegree, n * sizeof(ui), cudaMemcpyDeviceToDevice));
-
+    chkerr(cudaMemcpy(deviceGraph.cliqueCore, deviceGraph.cliqueDegree, graph.n * sizeof(ui), cudaMemcpyDeviceToDevice));
     while(count < graph.n){
         cudaMemset(bufTails, 0, sizeof(unsigned int)*BLK_NUMS);
 
