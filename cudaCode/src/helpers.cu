@@ -5,6 +5,19 @@
 //TODO: Make code a bit more structured and clean
 //TODO: Try to find more ways to optimize
 
+__device__ inline void writeToBuffer(ui *glBuffer, ui loc, ui v, ui bufferSize){
+    assert(loc < bufferSize);
+    glBuffer[loc] = v;
+}
+
+__device__ inline ui readFromBuffer(ui* glBuffer, ui loc,, ui bufferSize){
+    assert(loc < bufferSize);
+    return glBuffer[loc];
+}
+
+
+
+
 __global__ void generateDegreeDAG(deviceGraphPointers G, deviceDAGpointer D, ui *listingOrder, ui n, ui m, ui totalWarps) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
@@ -432,4 +445,160 @@ __global__ void sortTrieData(deviceGraphPointers G, deviceCliquesPointer cliqueD
 }
 
 
+__global__ void selectNodes(deviceGraphPointers G, ui *bufTails,ui *glBuffers, ui glBufferSize, ui n, ui level){
+    __shared__ ui *glBuffer; 
+    __shared__ ui bufTail; 
+    
+    if(THID == 0){
+        bufTail = 0;
+        glBuffer = glBuffers + blockIdx.x*glBufferSize;
+    }
+    __syncthreads();
+
+    ui idx = blockIdx.x * blockDim.x + threadIdx.x; 
+    for(ui base = 0; base < n; base += BLK_DIM){
+        
+        ui v = base + idx; 
+
+        if(v >= n) continue;
+
+        if(G.cliqueCore[v] == level){
+            ui loc = atomicAdd(&bufTail, 1);
+            writeToBuffer(glBuffer, loc, v,glBufferSize);
+        }
+    }
+
+    __syncthreads();
+
+    if(THID == 0) 
+    {
+        bufTails [blockIdx.x] = bufTail;
+    }
+
+}
+
+__global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cliqueData, ui *bufTails,ui *glBuffers, ui *globalCount, ui glBufferSize, ui n, ui level, ui k){
+    __shared__ ui bufTail;
+    __shared__ ui *glBuffer;
+    __shared__ ui base;
+    ui warpId = THID / 32;
+    ui laneId = THID % 32;
+    ui regTail;
+    ui i;
+    if(THID==0){
+    bufTail = bufTails[blockIdx.x];
+    base = 0;
+    glBuffer = glBuffers + blockIdx.x*GLBUFFER_SIZE; 
+    assert(glBuffer!=NULL);
+    }
+
+    while(true){
+    __syncthreads(); 
+    if(base == bufTail) break; // all the threads will evaluate to true at same iteration
+    i = base + warp_id;
+    regTail = bufTail;
+    __syncthreads();
+
+    if(i >= regTail) continue; // this warp won't have to do anything            
+
+    if(THID == 0){
+    base += WARPS_EACH_BLK;
+    if(regTail < base )
+    base = regTail;
+    }
+    //bufTail is incremented in the code below:
+    ui v = readFromBuffer(glBuffer, i,bufferSize);
+
+ 
+    __syncwarp();
+    for(ui i =laneId; i<t; i+=warpSize){
+
+        if( (v = cliqueData.trie[i]) && (cliqueData.status[i]==1)){
+            for(ui j =1;j<k;j++){
+                ui u = cliqueData.trie[j*t+i];
+                int a = atomicSub(&G.cliqueCore[u]);
+                if(a == level+1){
+                    ui loc = atomicAdd(&bufTail, 1);
+            
+                    writeToBuffer(glBuffer, loc, u);
+                }
+                if(a <= level){ 
+                    atomicAdd(&G.cliqueCore[u], 1);
+                }
+            }
+            cliqueData.status[i]==0;
+            
+            
+        }
+    }
+    
+
+    if(THID == 0 && bufTail>0){
+    atomicAdd(globalCount, bufTail); // atomic since contention among blocks
+    }
+}
+}
+
+__global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer cliqueData, ui *bufTails,ui *glBuffers, ui *globalCount, ui glBufferSize, ui n, ui level, ui k){
+    __shared__ ui bufTail;
+    __shared__ ui *glBuffer;
+    __shared__ ui base;
+    ui warpId = THID / 32;
+    ui laneId = THID % 32;
+    ui regTail;
+    ui i;
+    if(THID==0){
+    bufTail = bufTails[blockIdx.x];
+    base = 0;
+    glBuffer = glBuffers + blockIdx.x*GLBUFFER_SIZE; 
+    assert(glBuffer!=NULL);
+    }
+
+    while(true){
+    __syncthreads(); 
+    if(base == bufTail) break; // all the threads will evaluate to true at same iteration
+    i = base + blockIdx.x;
+    regTail = bufTail;
+    __syncthreads();
+
+    if(i >= regTail) continue; // this warp won't have to do anything            
+
+    if(THID == 0){
+    base += 1;
+    if(regTail < base )
+    base = regTail;
+    }
+    //bufTail is incremented in the code below:
+    ui v = readFromBuffer(glBuffer, i,bufferSize);
+
+ 
+    __syncwarp();
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    for(ui i = idx; i<t; i+= BLK_DIM){
+        if( (v = cliqueData.trie[i]) && (cliqueData.status[i]==1)){
+            for(ui j =1;j<k;j++){
+                ui u = cliqueData.trie[j*t+i];
+                int a = atomicSub(&G.cliqueCore[u]);
+                if(a == level+1){
+                    ui loc = atomicAdd(&bufTail, 1);
+            
+                    writeToBuffer(glBuffer, loc, u);
+                }
+                if(a <= level){ 
+                    atomicAdd(&G.cliqueCore[u], 1);
+                }
+            }
+            cliqueData.status[i]==0;
+            
+            
+        }
+
+    }
+    
+
+    if(THID == 0 && bufTail>0){
+    atomicAdd(globalCount, bufTail); // atomic since contention among blocks
+    }
+}
+}
 
