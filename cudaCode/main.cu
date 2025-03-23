@@ -199,9 +199,19 @@ int main(int argc, const char * argv[]) {
     chkerr(cudaMalloc(&glBuffers,BLK_NUMS*glBufferSize*sizeof(ui)));
     cudaDeviceSynchronize();
 
+    double *coreDensity;
+    chkerr(cudaMalloc((void**)&coreDensity, graph.n*sizeof(double)));
+
 //    chkerr(cudaMemset(glBuffers, 0, BLK_NUMS*glBufferSize*sizeof(ui)));
 
     chkerr(cudaMemcpy(deviceGraph.cliqueCore, deviceGraph.cliqueDegree, graph.n * sizeof(ui), cudaMemcpyDeviceToDevice));
+
+    //density of full graph
+    thrust::device_vector<ui> dev_vec1(cliqueData.status, cliqueData.status + t);
+    ui currentCliques = thrust::reduce(dev_vec1.begin(), dev_vec1.end(), 0, thrust::plus<ui>());
+    double d = static_cast<double>(currentCliques) / (graph.n - count);
+    chkerr(cudaMemcpy(coreDensity+level, &d, sizeof(double), cudaMemcpyHostToDevice));
+
     while(count < graph.n){
         cudaMemset(bufTails, 0, sizeof(unsigned int)*BLK_NUMS);
 
@@ -224,6 +234,13 @@ int main(int argc, const char * argv[]) {
 
         chkerr(cudaMemcpy(&count, globalCount, sizeof(unsigned int), cudaMemcpyDeviceToHost));    
         level++;
+        if(count!=graph.n){
+            currentCliques = thrust::reduce(dev_vec1.begin(), dev_vec1.end(), 0, thrust::plus<ui>());
+            d = static_cast<double>(currentCliques) / (graph.n - count);
+            chkerr(cudaMemcpy(coreDensity+level, &d, sizeof(double), cudaMemcpyHostToDevice));
+
+        }
+        
     }
     graph.kmax = level-1;
 
