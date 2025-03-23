@@ -575,3 +575,8 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
     }
 }
 }
+
+
+__global__ void locateDensetCore(){
+    
+}
