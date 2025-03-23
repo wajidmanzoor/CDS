@@ -151,7 +151,7 @@ int main(int argc, const char * argv[]) {
     cout<<endl<<"total cliques "<<tt<<endl;
 
     size_t sharedMemorySort =  2*k*WARPS_EACH_BLK * sizeof(ui);
-    sortTrieData<<<1, 64,sharedMemorySort>>>(deviceGraph, cliqueData, tt,t, k, TOTAL_THREAD);
+    sortTrieData<<<BLK_NUMS, BLK_DIM,sharedMemorySort>>>(deviceGraph, cliqueData, tt,t, k, TOTAL_THREAD);
     CUDA_CHECK_ERROR("Sort Trie Data Structure");
 
     int *h_cliques,*status;
@@ -218,7 +218,7 @@ int main(int argc, const char * argv[]) {
             processNodesByWarp<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, tt);
             cudaDeviceSynchronize();
         }else{
-            processNodesByBlock<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, , graph.n, level, k);
+            processNodesByBlock<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, tt);
 
         }
 

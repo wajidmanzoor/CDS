@@ -28,8 +28,8 @@
 #include <sys/stat.h>
 #include <mutex>
 
-#define BLK_NUMS 1
-#define BLK_DIM 64
+#define BLK_NUMS 10
+#define BLK_DIM 1024
 #define TOTAL_THREAD (BLK_NUMS*BLK_DIM)
 #define WARPSIZE 32
 #define WARPS_EACH_BLK (BLK_DIM/32)
@@ -71,7 +71,7 @@ typedef struct  {
     ui *neighbors;
     
     ui *cliqueDegree;
-    ui *cliqueCore;
+    int *cliqueCore;
     
     double *density;
     ui *motifCount;
