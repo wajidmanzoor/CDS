@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.10)
 project(CDS LANGUAGES CXX CUDA)
 
 # Set the CUDA architecture
-set(CMAKE_CUDA_ARCHITECTURES 75 80 86)
+set(CMAKE_CUDA_ARCHITECTURES 80 86)
 
 # Add executable
 add_executable(main 
