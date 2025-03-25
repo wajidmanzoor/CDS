@@ -60,6 +60,7 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
 
     size_t sharedMemoryIntialClique =  WARPS_EACH_BLK * sizeof(ui);
     listIntialCliques<<<BLK_NUMS, BLK_DIM,sharedMemoryIntialClique>>>(deviceDAG, levelData, labels, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, level, TOTAL_WARPS);
+    cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Generate Intial Partial Cliques");
     ui partialSize = TOTAL_WARPS * pSize;
     //ui candidateSize = TOTAL_WARPS * cpSize;
@@ -70,6 +71,7 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
     createLevelDataOffset(levelData, offsetPartitionSize, TOTAL_WARPS);
 
     flushParitions<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, pSize,cpSize,k, maxBitMask, level, TOTAL_WARPS);
+    cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Flush Partition data structure");
 
     iterK--;
@@ -88,6 +90,7 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
         chkerr(cudaMemset(levelData.validNeighMaskPartition,0, (partialSize * maxBitMask) * sizeof(ui)));
 
         listMidCliques<<<BLK_NUMS, BLK_DIM,sharedMemoryMid>>>(deviceDAG, levelData, labels, k, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, totalTasks, level, TOTAL_WARPS);
+        cudaDeviceSynchronize();
         CUDA_CHECK_ERROR("Generate Mid Partial Cliques");
 
         createLevelDataOffset(levelData, offsetPartitionSize, TOTAL_WARPS);
@@ -96,6 +99,7 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
         chkerr(cudaMemset(levelData.validNeighMask,0,partialSize*maxBitMask*sizeof(ui)));
 
         flushParitions<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, pSize,cpSize,k, maxBitMask, level, TOTAL_WARPS);
+        cudaDeviceSynchronize();
         CUDA_CHECK_ERROR("Flush Partition data structure");
 
         iterK--;
@@ -117,6 +121,7 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
     chkerr(cudaMemset(cliqueData.trie, 0, t * k * sizeof(ui)));
     if(iterK == 2) {
         writeFinalCliques<<<BLK_NUMS, BLK_DIM,sharedMemoryFinal>>>(deviceGraph, deviceDAG, levelData, cliqueData, totalCliques, k, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, t,totalTasks, level, TOTAL_WARPS);
+        cudaDeviceSynchronize();
         CUDA_CHECK_ERROR("Generate Full Cliques");
     }
 
@@ -131,6 +136,7 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
 
     size_t sharedMemorySort =  2*k*WARPS_EACH_BLK * sizeof(ui);
     sortTrieData<<<BLK_NUMS, BLK_DIM,sharedMemorySort>>>(deviceGraph, cliqueData, tt,t, k, TOTAL_THREAD);
+    cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Sort Trie Data Structure");
 
     cudaFree(totalCliques)
@@ -173,6 +179,8 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
         // Select nodes whoes current degree is level, that means they should be removed as part of the level core 
         selectNodes<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, bufTails, glBuffers, glBufferSize, graph.n, level);
         cudaDeviceSynchronize();
+        CUDA_CHECK_ERROR("Select Node of Clique Core Decompose");
+
         
         //Total number of verticies in buffer
         thrust::device_vector<ui> dev_vec(bufTails, bufTails + BLK_NUMS);
@@ -182,9 +190,14 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
         if(true){
             processNodesByWarp<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, tt);
             cudaDeviceSynchronize();
+            CUDA_CHECK_ERROR("Process Node by Warp  of Clique Core Decompose");
+
         }else{
             processNodesByBlock<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, tt);
             cudaDeviceSynchronize();
+            CUDA_CHECK_ERROR("Process Node by Block of Clique Core Decompose");
+
+            
 
         }
 
@@ -218,6 +231,34 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
     cudaFree(remainingCliques);
 
 }
+
+
+void generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, densestCorePointer densestCore, ui coreSize, ui coreTotalCliques, double maxDensity){
+    memoryAllocationDensestCore(densestCore, coreSize, maxDensity , coreTotalCliques);
+    ui *globalCount;
+
+    chkerr(cudaMalloc((void**)&globalCount, sizeof(ui)));
+    chkerr(cudaMemset(globalCount, 0, sizeof(ui)));
+
+    ui lowerBoundDensity = static_cast<ui>(std::ceil(maxDensity));
+
+    generateDensestCore<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,densestCore,globalCount,graph.n,lowerBoundDensity,TOTAL_WARPS);
+    cudaDeviceSynchronize();
+
+    thrust::inclusive_scan(thrust::device_ptr<ui>(densestCore.offset), thrust::device_ptr<ui>(densestCore.offset + coreSize + 1), thrust::device_ptr<ui>(densestCore.offset));
+
+    ui edgeCountCore;
+    chkerr(cudaMemcpy(&edgeCountCore, densestCore.offset+coreSize , sizeof(ui), cudaMemcpyDeviceToHost));
+    chkerr(cudaMalloc((void**)&(densestCore.neighbors), edgeCountCore * sizeof(ui)));
+
+    size_t sharedMemoryGenNeighCore =  WARPS_EACH_BLK * sizeof(ui);
+    generateNeighborDensestCore<<<BLK_NUMS, BLK_DIM,sharedMemoryGenNeighCore>>>(deviceGraph,densestCore,lowerBoundDensity,TOTAL_WARPS);
+    cudaDeviceSynchronize();
+
+
+
+}
+
 int main(int argc, const char * argv[]) {
     if (argc != 7) {
         cout << "Server wrong input parameters!" << endl;
@@ -290,10 +331,8 @@ int main(int argc, const char * argv[]) {
     int argmax;
     cliqueCoreDecompose(graph,deviceGraph,cliqueData,maxCore, maxDensity, argmax, coreSize, coreTotalCliques,glBufferSize, k,  t, tt);
 
-
-    
-
     //TODO: LOCATE CORE
+    generateDensestCore(graph,deviceGraph,  densestCore, coreSize, coreTotalCliques,maxDensity);
 
     //TODO: LISTING AGAIN
 
