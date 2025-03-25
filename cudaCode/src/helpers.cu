@@ -526,55 +526,59 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
     assert(glBuffer!=NULL);
     }
 
+
+
     while(true){
-    __syncthreads();
-    if(base == bufTail) break; // all the threads will evaluate to true at same iteration
-    i = base + blockIdx.x;
-    regTail = bufTail;
-    __syncthreads();
+        __syncthreads();
+        if(base == bufTail) break; // all the threads will evaluate to true at same iteration
+        i = base + blockIdx.x;
+        regTail = bufTail;
+        __syncthreads();
 
-    if(i >= regTail) continue; // this warp won't have to do anything
+        if(i >= regTail) continue; // this warp won't have to do anything
 
-    if(threadIdx.x == 0){
-    base += 1;
-    if(regTail < base )
-    base = regTail;
-    }
-    //bufTail is incremented in the code below:
-    ui v = glBuffer[i];
+        if(threadIdx.x == 0){
+            base += 1;
+            if(regTail < base )
+            base = regTail;
+        }
+        //bufTail is incremented in the code below:
+        ui v = glBuffer[i];
 
+        __syncthreads();
+        ui idx = threadIdx.x;
 
-   __syncthreads();
-    int idx = threadIdx.x ;
-    for(ui j = idx; j<t; j+= BLK_DIM){
-        if( (v = cliqueData.trie[j]) && (cliqueData.status[j]==1)){
-            for(ui x =1;x<k;x++){
-                ui u = cliqueData.trie[x*t+i];
-                int a = atomicSub(&G.cliqueCore[u], 1);
-                if(a == level+1){
-                    ui loc = atomicAdd(&bufTail, 1);
-                    glBuffer[loc] = u;
+        for(ui j = idx; j<t; j+= BLK_DIM){
 
+            if( (v == cliqueData.trie[j]) && (cliqueData.status[j]==1)){
+                for(ui x =1;x<k;x++){
+                    ui u = cliqueData.trie[x*t+i];
+                    int a = atomicSub(&G.cliqueCore[u], 1);
+                    if(a == level+1){
+                        ui loc = atomicAdd(&bufTail, 1);
+                        glBuffer[loc] = u;
+
+                    }
+                    if(a <= level){
+                        atomicAdd(&G.cliqueCore[u], 1);
+                    }
                 }
-                if(a <= level){
-                    atomicAdd(&G.cliqueCore[u], 1);
-                }
+                cliqueData.status[i] = 0;
+
+
             }
-            cliqueData.status[i] = 0;
-
 
         }
 
-    }
 
+        __syncthreads();
 
-    __syncthreads();
-
-    if(threadIdx.x == 0 && bufTail>0){
-    atomicAdd(globalCount, bufTail); // atomic since contention among blocks
+        if(threadIdx.x == 0 && bufTail>0){
+            atomicAdd(globalCount, 1); // atomic since contention among blocks
+        }
     }
 }
-}
+
 
 
 __global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer densestCore,ui *globalCount, ui n, ui density, ui totalWarps){
