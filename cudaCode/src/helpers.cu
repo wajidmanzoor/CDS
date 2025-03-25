@@ -577,6 +577,75 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
 }
 
 
-__global__ void locateDensetCore(){
-    
+__global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer densestCore,ui *globalCount, ui n, ui density, ui totalWarps){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int warpId = idx / warpSize;
+    int laneId = idx % warpSize;
+
+    for(ui i = warpId; i < n; i += totalWarps){
+        if(G.cliqueCore[i]>= density){
+            ui loc;
+            if(laneId==0){
+                loc = atomicAdd(globalCount,1);
+                densestCore.mapping[loc] = i;
+            }
+            loc = __shfl_sync(0xFFFFFFFF, loc, 0, 32);
+            ui start = G.offset[i];
+            ui end = G.offset[i+1];
+            ui total = end - start;
+            ui neigh;
+            int count = 0;
+            for(int j = laneId; j < total; j += warpSize) {
+                neigh = G.neighbors[start + j];
+                if(G.cliqueCore[neigh] >= density) {
+                    count++;
+                }
+            }
+            for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+                count += __shfl_down_sync(0xFFFFFFFF, count, offset);
+            }
+            if(laneId == 0) {
+                densestCore.offset[loc+1] = count;
+            }
+
+        }
+    }
 }
+
+__global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui density) {
+
+    extern __shared__ char sharedMemory[];
+    ui sizeOffset = 0;
+
+    ui *counter = (ui *)(sharedMemory + sizeOffset);
+
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int warpId = idx / warpSize;
+    int laneId = idx % warpSize;
+
+    for(ui i = warpId; i < n; i += totalWarps) {
+        if(laneId==0){
+          counter[threadIdx.x / warpSize] = D.offset[i];
+        }
+        __syncwarp();
+        ui vertex = densestCore.mapping[i];
+        ui start = G.offset[vertex];
+        ui end = G.offset[vertex+1];
+        ui total = end - start;
+        ui neigh;
+        for(int j = laneId; j < total; j += warpSize) {
+            neigh = G.neighbors[start + j];
+
+            if(G.cliqueCore[neigh] >= density) {
+                int loc = atomicAdd(&counter[threadIdx.x / warpSize], 1);
+                densestCore.neighbors[loc] = neigh;
+
+            }
+        }
+      __syncwarp();
+    }
+}
+
+
+
+
