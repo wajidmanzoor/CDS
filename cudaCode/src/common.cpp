@@ -5,4 +5,4 @@ deviceGraphPointers deviceGraph;
 deviceDAGpointer deviceDAG;
 cliqueLevelDataPointer levelData;
 deviceCliquesPointer cliqueData;
-densestCorePointer densestCore;
+densestCorePointer  densestCore;
