@@ -114,6 +114,20 @@ typedef struct {
     ui *max;
 }cliqueLevelDataPointer; 
 
+typedef struct{
+    ui *mapping;
+    ui *offset;
+    ui *neighbors;
+    ui *cliqueDegree;
+    //ui *cliqueCore;
+    double *density;
+    ui *n;
+    ui *m;
+    ui *totalCliques;
+
+
+}densestCorePointer;
+
 extern  deviceGraphPointers deviceGraph;
 extern  deviceDAGpointer deviceDAG;
 extern  cliqueLevelDataPointer levelData;
