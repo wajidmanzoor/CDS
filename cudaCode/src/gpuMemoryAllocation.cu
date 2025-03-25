@@ -116,6 +116,31 @@ ui memoryAllocationlevelData(cliqueLevelDataPointer &L, ui k, ui pSize, ui cpSiz
     cudaDeviceSynchronize();
     return maxBitMask;
 }
+void memoryAllocationDensestCore(densestCorePointer &C, ui n, ui density, ui totalCliques){
+
+    chkerr(cudaMalloc((void**)&(C.offset), n * sizeof(ui)));
+
+    chkerr(cudaMalloc((void**)&(C.offset), (n+1) * sizeof(ui)));
+    chkerr(cudaMemset(C.offset, 0, (n+1)* sizeof(ui)));
+
+    //neighbors will be allocated once we now the size
+
+    chkerr(cudaMalloc((void**)&(C.cliqueDegree), n * sizeof(ui)));
+    //chkerr(cudaMalloc((void**)&(C.cliqueCore), n * sizeof(ui)));
+
+    chkerr(cudaMalloc((void**)&(C.density), n * sizeof(double)));
+    chkerr(cudaMemcpy(C.density, &density, sizeof(double), cudaMemcpyHostToDevice));
+
+    chkerr(cudaMalloc((void**)&(C.n), sizeof(ui)));
+    chkerr(cudaMemcpy(C.n, &n, sizeof(ui), cudaMemcpyHostToDevice));
+
+    
+    chkerr(cudaMalloc((void**)&(C.totalCliques), sizeof(ui)));
+    chkerr(cudaMemcpy(C.totalCliques, &totalCliques, sizeof(ui), cudaMemcpyHostToDevice));
+
+    
+}
+
 
 // Memory deallocation functions
 void freeGraph(deviceGraphPointers &G) {
@@ -132,6 +157,7 @@ void freeGraph(deviceGraphPointers &G) {
 /*void freeMotif(deviceMotifPointers &M) {
     chkerr(cudaFree(M.adjacencyMatrix));
 }*/
+
 
 void freeComponents(deviceComponentPointers &C) {
     chkerr(cudaFree(C.componentOffset));
@@ -177,5 +203,18 @@ void freeLevelData(cliqueLevelDataPointer &L) {
     chkerr(cudaFree(L.validNeighMask));
     chkerr(cudaFree(L.count));
     chkerr(cudaFree(L.max));
+}
+
+void freeDensestCore(densestCorePointer &C){
+    chkerr(cudaFree(C.mapping));
+    chkerr(cudaFree(C.offset));
+    chkerr(cudaFree(C.neighbors));
+    chkerr(cudaFree(C.density));
+    chkerr(cudaFree(C.n));
+    chkerr(cudaFree(C.m));
+    chkerr(cudaFree(C.totalCliques));
+    chkerr(cudaFree(C.cliqueDegree));
+    //chkerr(cudaFree(C.cliqueCore));
+ 
 }
 
