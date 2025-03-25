@@ -132,6 +132,8 @@ extern  deviceGraphPointers deviceGraph;
 extern  deviceDAGpointer deviceDAG;
 extern  cliqueLevelDataPointer levelData;
 extern  deviceCliquesPointer cliqueData;
+extern  densestCorePointer  densestCore;
+
 
 
 

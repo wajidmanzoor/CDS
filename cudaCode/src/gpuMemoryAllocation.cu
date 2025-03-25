@@ -118,7 +118,8 @@ ui memoryAllocationlevelData(cliqueLevelDataPointer &L, ui k, ui pSize, ui cpSiz
 }
 void memoryAllocationDensestCore(densestCorePointer &C, ui n, ui density, ui totalCliques){
 
-    chkerr(cudaMalloc((void**)&(C.offset), n * sizeof(ui)));
+
+    chkerr(cudaMalloc((void**)&(C.mapping), n* sizeof(ui)));
 
     chkerr(cudaMalloc((void**)&(C.offset), (n+1) * sizeof(ui)));
     chkerr(cudaMemset(C.offset, 0, (n+1)* sizeof(ui)));
@@ -136,9 +137,7 @@ void memoryAllocationDensestCore(densestCorePointer &C, ui n, ui density, ui tot
 
     
     chkerr(cudaMalloc((void**)&(C.totalCliques), sizeof(ui)));
-    chkerr(cudaMemcpy(C.totalCliques, &totalCliques, sizeof(ui), cudaMemcpyHostToDevice));
-
-    
+    chkerr(cudaMemcpy(C.totalCliques, &totalCliques, sizeof(ui), cudaMemcpyHostToDevice));  
 }
 
 
