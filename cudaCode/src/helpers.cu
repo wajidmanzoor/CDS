@@ -612,7 +612,7 @@ __global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer de
     }
 }
 
-__global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui n, ui density, ui totalWarps) {
+__global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui density, ui totalWarps) {
 
     extern __shared__ char sharedMemory[];
     ui sizeOffset = 0;
@@ -623,7 +623,7 @@ __global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePo
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
 
-    for(ui i = warpId; i < n; i += totalWarps) {
+    for(ui i = warpId; i < (*densestCore.n); i += totalWarps) {
         if(laneId==0){
           counter[threadIdx.x / warpSize] = densestCore.offset[i];
         }

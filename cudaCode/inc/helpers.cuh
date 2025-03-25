@@ -21,4 +21,4 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
 
 //kernel function to locate the densest core 
 __global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer densestCore,ui *globalCount, ui n, ui density, ui totalWarps);
-__global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui n, ui density, ui totalWarps);
+__global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui density, ui totalWarps);
