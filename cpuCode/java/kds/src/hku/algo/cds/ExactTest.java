@@ -126,7 +126,8 @@ public class ExactTest {
 								LocateCore d=new LocateCore(Graph, r_d, a.gentgraph_size());	
 								DensestCore r_c=d.locate();
 								
-
+								// HERE HERE 
+								
 								//wm: list all k-cliques and get the updted clique core values
 								KList b=new KList(r_c.Graph,a.Motif.length);
 								b.ListRecord();
