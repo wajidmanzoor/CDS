@@ -5,7 +5,6 @@
 //TODO: Make code a bit more structured and clean
 //TODO: Try to find more ways to optimize
 
-
 __global__ void generateDegreeDAG(deviceGraphPointers G, deviceDAGpointer D, ui *listingOrder, ui n, ui m, ui totalWarps) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
@@ -66,8 +65,6 @@ __global__ void generateNeighborDAG(deviceGraphPointers G, deviceDAGpointer D, u
       __syncwarp();
     }
 }
-
-
 
 __global__ void listIntialCliques(deviceDAGpointer D, cliqueLevelDataPointer levelData, ui *label, ui k, ui n, ui m, ui psize, ui cpSize, ui maxBitMask, ui level, ui totalWarps) {
     extern __shared__ char sharedMemory[];
@@ -205,7 +202,6 @@ __global__ void flushParitions(deviceDAGpointer D, cliqueLevelDataPointer levelD
 
 }
 
-
 __global__ void listMidCliques(deviceDAGpointer D, cliqueLevelDataPointer levelData, ui *label, ui k,ui iterK, ui n, ui m,ui pSize, ui cpSize, ui maxBitMask,ui totalTasks, ui level, ui totalWarps){
 
     extern __shared__ char sharedMemory[];
@@ -308,7 +304,6 @@ __global__ void listMidCliques(deviceDAGpointer D, cliqueLevelDataPointer levelD
     
 }
 
-
 __global__ void writeFinalCliques(deviceGraphPointers G, deviceDAGpointer D, cliqueLevelDataPointer levelData, deviceCliquesPointer cliqueData, ui *globalCounter,ui k,ui iterK, ui n, ui m,ui pSize, ui cpSize, ui maxBitMask,ui trieSize,ui totalTasks, ui level, ui totalWarps){
     extern __shared__ char sharedMemory[];
     ui sizeOffset = 0;
@@ -351,7 +346,7 @@ __global__ void writeFinalCliques(deviceGraphPointers G, deviceDAGpointer D, cli
                     atomicAdd(&counter[warpId],1);
                     cliqueData.trie[trieSize * (k-2) + loc]  = candidate;
                     cliqueData.trie[trieSize * (k-1) + loc] = neigh;
-                    cliqueData.status[loc]=1;
+                    cliqueData.status[loc]=-1;
                     atomicAdd(&G.cliqueDegree[neigh],1);
                     atomicAdd(&G.cliqueDegree[candidate],1);
 
@@ -370,7 +365,6 @@ __global__ void writeFinalCliques(deviceGraphPointers G, deviceDAGpointer D, cli
     }
 
 }
-
 
 __global__ void sortTrieData(deviceGraphPointers G, deviceCliquesPointer cliqueData, ui totalCliques, ui t, ui k, ui totalThreads){
     extern __shared__ char sharedMemory[];
@@ -420,7 +414,6 @@ __global__ void sortTrieData(deviceGraphPointers G, deviceCliquesPointer cliqueD
 
 }
 
-
 __global__ void selectNodes(deviceGraphPointers G, ui *bufTails,ui *glBuffers, ui glBufferSize, ui n, ui level){
     __shared__ ui *glBuffer;
     __shared__ ui bufTail;
@@ -449,7 +442,7 @@ __global__ void selectNodes(deviceGraphPointers G, ui *bufTails,ui *glBuffers, u
 
 }
 
-__global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cliqueData, ui *bufTails,ui *glBuffers, ui *globalCount, ui glBufferSize, ui n, ui level, ui k, ui t){
+__global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cliqueData, ui *bufTails,ui *glBuffers, ui *globalCount, ui glBufferSize, ui n, ui level, ui k, ui t, ui tt){
     __shared__ ui bufTail;
     __shared__ ui *glBuffer;
     __shared__ ui base;
@@ -458,61 +451,61 @@ __global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cl
     ui regTail;
     ui i;
     if(threadIdx.x==0){
-    bufTail = bufTails[blockIdx.x];
-    base = 0;
-    glBuffer = glBuffers + blockIdx.x*glBufferSize;
-    assert(glBuffer!=NULL);
+        bufTail = bufTails[blockIdx.x];
+        base = 0;
+        glBuffer = glBuffers + blockIdx.x*glBufferSize;
+        assert(glBuffer!=NULL);
     }
 
     while(true){
-    __syncthreads();
-    if(base == bufTail) break; // all the threads will evaluate to true at same iteration
-    i = base + warpId;
-    regTail = bufTail;
-    __syncthreads();
+        __syncthreads();
+        if(base == bufTail) break; // all the threads will evaluate to true at same iteration
+        i = base + warpId;
+        regTail = bufTail;
+        __syncthreads();
 
-    if(i >= regTail) continue; // this warp won't have to do anything
+        if(i >= regTail) continue; // this warp won't have to do anything
 
-    if(threadIdx.x == 0){
-    base += WARPS_EACH_BLK;
-    if(regTail < base )
-    base = regTail;
-    }
-    //bufTail is incremented in the code below:
-    ui v = glBuffer[i];
+        if(threadIdx.x == 0){
+            base += WARPS_EACH_BLK;
+            if(regTail < base )
+            base = regTail;
+        }
+        //bufTail is incremented in the code below:
+        ui v = glBuffer[i];
 
 
-   __syncthreads();
-    for(ui j =laneId; j<t; j+=warpSize){
+        __syncthreads();
+        for(ui j =laneId; j<tt; j+=warpSize){
 
-        if( (v == cliqueData.trie[j]) && (cliqueData.status[j] ==1)){
+            if( (v == cliqueData.trie[j]) && (cliqueData.status[j] ==-1)){
 
-            for(ui x =1;x<k;x++){
-                ui u = cliqueData.trie[x*t+i];
-                int a = atomicSub(&G.cliqueCore[u],1);
-                if(a == level+1){
-                    ui loc = atomicAdd(&bufTail, 1);
-                    glBuffer[loc] = u;
+                for(ui x =1;x<k;x++){
+                    ui u = cliqueData.trie[x*t+j];
+                    int a = atomicSub(&G.cliqueCore[u],1);
+                    if(a == level+1){
+                        ui loc = atomicAdd(&bufTail, 1);
+                        glBuffer[loc] = u;
 
+                    }
+                    if(a <= level){
+                        atomicAdd(&G.cliqueCore[u], 1);
+                    }
                 }
-                if(a <= level){
-                    atomicAdd(&G.cliqueCore[u], 1);
-                }
+                cliqueData.status[j] = level;
+
+
             }
-            cliqueData.status[i] = 0;
+        }
 
-
+        __syncthreads();
+        if(threadIdx.x == 0 && bufTail>0){
+            atomicAdd(globalCount, 1); // atomic since contention among blocks
         }
     }
-
-__syncthreads();
-    if(threadIdx.x == 0 && bufTail>0){
-    atomicAdd(globalCount, bufTail); // atomic since contention among blocks
-    }
-}
 }
 
-__global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer cliqueData, ui *bufTails,ui *glBuffers, ui *globalCount, ui glBufferSize, ui n, ui level, ui k, ui t){
+__global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer cliqueData, ui *bufTails,ui *glBuffers, ui *globalCount, ui glBufferSize, ui n, ui level, ui k, ui t, ui tt){
     __shared__ ui bufTail;
     __shared__ ui *glBuffer;
     __shared__ ui base;
@@ -548,11 +541,11 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
         __syncthreads();
         ui idx = threadIdx.x;
 
-        for(ui j = idx; j<t; j+= BLK_DIM){
+        for(ui j = idx; j<tt; j+= BLK_DIM){
 
-            if( (v == cliqueData.trie[j]) && (cliqueData.status[j]==1)){
+            if( (v == cliqueData.trie[j]) && (cliqueData.status[j]==-1)){
                 for(ui x =1;x<k;x++){
-                    ui u = cliqueData.trie[x*t+i];
+                    ui u = cliqueData.trie[x*t+j];
                     int a = atomicSub(&G.cliqueCore[u], 1);
                     if(a == level+1){
                         ui loc = atomicAdd(&bufTail, 1);
@@ -563,7 +556,7 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
                         atomicAdd(&G.cliqueCore[u], 1);
                     }
                 }
-                cliqueData.status[i] = 0;
+                cliqueData.status[j] = level;
 
 
             }
@@ -578,8 +571,6 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
         }
     }
 }
-
-
 
 __global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer densestCore,ui *globalCount, ui n, ui density, ui totalWarps){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -616,7 +607,7 @@ __global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer de
     }
 }
 
-__global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui density, ui totalWarps) {
+__global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui *reverseMap, ui density, ui totalWarps) {
 
     extern __shared__ char sharedMemory[];
     ui sizeOffset = 0;
@@ -642,7 +633,7 @@ __global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePo
 
             if(G.cliqueCore[neigh] >= density) {
                 int loc = atomicAdd(&counter[threadIdx.x / warpSize], 1);
-                densestCore.neighbors[loc] = neigh;
+                densestCore.neighbors[loc] = reverseMap[neigh];
 
             }
         }
@@ -650,6 +641,51 @@ __global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePo
     }
 }
 
+__global__ void pruneEdges(densestCorePointer densestCore, deviceCliquesPointer cliqueData, ui *reversemap, ui *pruneStatus,ui t, ui tt, ui k, ui level ){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int warpId = idx / warpSize;
+    int laneId = idx % warpSize;
+
+    for(ui i = warpId; i<tt; i+=TOTAL_WARPS){
+
+        if(cliqueData.status[i] >= level){
+
+            for(ui iter =0; iter< k ; iter ++){
+                // v should be mapped
+                ui u_ = ((iter)%k)*t+i;
+                ui u  =  reversemap[cliqueData.trie[u_]];
+                for(ui j = 0; j < k; j++){
+                    ui v_ = ((j)%k)*t+i;
+
+
+                    if(v_!=u_){
+                        int v = reversemap[cliqueData.trie[v_]];
+
+
+                        // Update u-v edge status
+                        ui start = densestCore.offset[u];
+                        ui end = densestCore.offset[u+1];
+                        ui total = end-start;
+
+                        for(ui ind = laneId; ind < total; ind +=WARPSIZE){
+                            int neigh = densestCore.neighbors[start+ind];
+                            if(neigh == v){
+                              atomicCAS(&pruneStatus[start+ind], 1, 0);
+                            }
+
+                        }
+
+                    }
+                }
+
+
+
+
+        }
+
+        }
+    }
+}
 
 
 

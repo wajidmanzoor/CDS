@@ -143,7 +143,7 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
     return tt;
 }
 
-void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,deviceCliquesPointer& cliqueData, ui &maxCore, double &maxDensity, int &argmax, ui &coreSize, ui &coreTotalCliques, ui glBufferSize, ui k, ui t, ui tt){
+void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,deviceCliquesPointer& cliqueData, ui &maxCore, double &maxDensity, ui &coreSize, ui &coreTotalCliques, ui glBufferSize, ui k, ui t, ui tt){
     ui level = 0;
     ui count = 0;
     ui *globalCount = NULL;
@@ -156,22 +156,20 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
     chkerr(cudaMemset(globalCount, 0, sizeof(ui)));
     cudaDeviceSynchronize();
 
-    chkerr(cudaMalloc((void**)&coreDensity, (graph.n+1)*sizeof(double)));
-
-    ui *removedVerticies, *remainingCliques;
-    chkerr(cudaMalloc((void**)&removedVerticies, (graph.n+1)*sizeof(ui)));
-    chkerr(cudaMalloc((void**)&remainingCliques, (graph.n+1)*sizeof(ui)));
-
-
 //    chkerr(cudaMemset(glBuffers, 0, BLK_NUMS*glBufferSize*sizeof(ui)));
 
     chkerr(cudaMemcpy(deviceGraph.cliqueCore, deviceGraph.cliqueDegree, graph.n * sizeof(ui), cudaMemcpyDeviceToDevice));
 
     //density of full graph
-    thrust::device_vector<ui> dev_vec1(cliqueData.status, cliqueData.status + t);
-    ui currentCliques = thrust::reduce(dev_vec1.begin(), dev_vec1.end(), 0, thrust::plus<ui>());
-    double d = static_cast<double>(currentCliques) / (graph.n - count);
-    chkerr(cudaMemcpy(coreDensity+level, &d, sizeof(double), cudaMemcpyHostToDevice));
+    thrust::device_vector<ui> dev_vec(cliqueData.status, cliqueData.status + tt);
+    ui currentCliques = thrust::count(dev_vec.begin(), dev_vec.end(), 1);
+
+    double currentDensity = static_cast<double>(currentCliques) / (graph.n - count);
+
+    maxDensity = currentDensity;
+    maxCore = 0;
+    coreTotalCliques = currentCliques;
+    coreSize = graph.n;
 
     while(count < graph.n){
         cudaMemset(bufTails, 0, sizeof(unsigned int)*BLK_NUMS);
@@ -183,17 +181,19 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
 
         
         //Total number of verticies in buffer
-        thrust::device_vector<ui> dev_vec(bufTails, bufTails + BLK_NUMS);
-        ui sum = thrust::reduce(dev_vec.begin(), dev_vec.end(), 0, thrust::plus<ui>());
+        thrust::device_vector<ui> dev_vec1(bufTails, bufTails + BLK_NUMS);
+        ui sum = thrust::reduce(dev_vec1.begin(), dev_vec1.end(), 0, thrust::plus<ui>());
+        cout<<"sum "<<sum;
+        cudaDeviceSynchronize();
 
         //Bases on total vertices device to either use Warp or Block to process one vertex and its cliques
         if(true){
-            processNodesByWarp<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, tt);
+            processNodesByWarp<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, t, tt);
             cudaDeviceSynchronize();
             CUDA_CHECK_ERROR("Process Node by Warp  of Clique Core Decompose");
 
         }else{
-            processNodesByBlock<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, tt);
+            processNodesByBlock<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, t, tt);
             cudaDeviceSynchronize();
             CUDA_CHECK_ERROR("Process Node by Block of Clique Core Decompose");
 
@@ -201,35 +201,28 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
 
         }
 
-        chkerr(cudaMemcpy(&count, globalCount, sizeof(unsigned int), cudaMemcpyDeviceToHost));    
-        level++;
-        currentCliques = thrust::reduce(dev_vec1.begin(), dev_vec1.end(), 0, thrust::plus<ui>());
-        d = static_cast<double>(currentCliques) / (graph.n - count);
-
-        chkerr(cudaMemcpy(coreDensity+level, &d, sizeof(double), cudaMemcpyHostToDevice));
-        chkerr(cudaMemcpy(removedVerticies+level , &count, sizeof(ui), cudaMemcpyHostToDevice));
-        chkerr(cudaMemcpy(remainingCliques+level , &currentCliques, sizeof(ui), cudaMemcpyHostToDevice));
-        cudaDeviceSynchronize();
+        if((graph.n - count)!=0){
+            currentCliques = thrust::count(dev_vec2.begin(), dev_vec2.end(), 1);
+            currentDensity = static_cast<double>(currentCliques) / (graph.n - count);
+    
+            if(currentDensity>=maxDensity){
+                maxDensity = currentDensity;
+                maxCore = level;
+                coreTotalCliques = currentCliques;
+                coreSize = graph.n-count;
+    
+            }
+            cout<<"Level "<<level<<" current "<<currentDensity<<" max "<<maxDensity<<" size "<<coreSize<<" graph "<<graph.n<<" cliques "<<currentCliques<<endl;
+    
+    
+    
+        }
 
     }
-    graph.kmax = level-1;
-    maxCore = level-1;
-    thrust::device_ptr<double> coreDensity_ptr(coreDensity);
-    thrust::device_ptr<double> max_iter1 = thrust::max_element(coreDensity_ptr, coreDensity_ptr + level);
-    maxDensity = *max_iter1;
-    argmax = max_iter1 - coreDensity_ptr;
-
-    chkerr(cudaMemcpy(&coreSize, removedVerticies + argmax, sizeof(ui), cudaMemcpyDeviceToHost));
-    coreSize = graph.n - coreSize;
-    chkerr(cudaMemcpy(&coreTotalCliques, remainingCliques + argmax, sizeof(ui), cudaMemcpyDeviceToHost));
 
     cudaFree(globalCount);
     cudaFree(bufTails);
     cudaFree(glBuffers);
-    cudaFree(coreDensity);
-    cudaFree(removedVerticies);
-    cudaFree(remainingCliques);
-
 }
 
 
@@ -329,7 +322,7 @@ int main(int argc, const char * argv[]) {
     ui coreSize, coreTotalCliques,maxCore;
     double maxDensity;
     int argmax;
-    cliqueCoreDecompose(graph,deviceGraph,cliqueData,maxCore, maxDensity, argmax, coreSize, coreTotalCliques,glBufferSize, k,  t, tt);
+    cliqueCoreDecompose(graph,deviceGraph,cliqueData,maxCore, maxDensity, coreSize, coreTotalCliques,glBufferSize, k,  t, tt);
 
     //TODO: LOCATE CORE
     generateDensestCore(graph,deviceGraph,  densestCore, coreSize, coreTotalCliques,maxDensity);
