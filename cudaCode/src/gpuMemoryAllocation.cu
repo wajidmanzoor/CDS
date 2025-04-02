@@ -77,7 +77,7 @@ void memoryAllocationresult(deviceResultpointer &R, ui n) {
 
 void memoryAllocationTrie(deviceCliquesPointer &C, ui t, ui k) {
     chkerr(cudaMalloc((void**)&(C.trie), (t * k) * sizeof(ui)));
-    chkerr(cudaMalloc((void**)&(C.status), t * sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(C.status), t * sizeof(int)));
     cudaDeviceSynchronize();
 }
 
