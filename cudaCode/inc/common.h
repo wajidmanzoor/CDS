@@ -96,7 +96,7 @@ typedef struct{
 typedef struct {
 
     ui *trie;
-    ui *status;
+    int *status;
 
 }deviceCliquesPointer;
 
