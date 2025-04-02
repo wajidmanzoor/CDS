@@ -117,7 +117,9 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
     size_t sharedMemoryFinal =  WARPS_EACH_BLK * sizeof(ui);
 
 
-    chkerr(cudaMemset(cliqueData.status, 0, t * sizeof(ui)));
+    thrust::device_ptr<int> dev_ptr(cliqueData.status);
+
+    thrust::fill(dev_ptr, dev_ptr + t, -2);
     chkerr(cudaMemset(cliqueData.trie, 0, t * k * sizeof(ui)));
     if(iterK == 2) {
         writeFinalCliques<<<BLK_NUMS, BLK_DIM,sharedMemoryFinal>>>(deviceGraph, deviceDAG, levelData, cliqueData, totalCliques, k, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, t,totalTasks, level, TOTAL_WARPS);
@@ -134,10 +136,11 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
     chkerr(cudaMemcpy(&tt, totalCliques, sizeof(ui), cudaMemcpyDeviceToHost));
     cout<<endl<<"total cliques "<<tt<<endl;
 
-    size_t sharedMemorySort =  2*k*WARPS_EACH_BLK * sizeof(ui);
-    sortTrieData<<<BLK_NUMS, BLK_DIM,sharedMemorySort>>>(deviceGraph, cliqueData, tt,t, k, TOTAL_THREAD);
-    cudaDeviceSynchronize();
-    CUDA_CHECK_ERROR("Sort Trie Data Structure");
+    // Sort Not needed
+    //size_t sharedMemorySort =  2*k*WARPS_EACH_BLK * sizeof(ui);
+    //sortTrieData<<<BLK_NUMS, BLK_DIM,sharedMemorySort>>>(deviceGraph, cliqueData, tt,t, k, TOTAL_THREAD);
+    //cudaDeviceSynchronize();
+    //CUDA_CHECK_ERROR("Sort Trie Data Structure");
 
     cudaFree(totalCliques)
     return tt;
@@ -161,8 +164,8 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
     chkerr(cudaMemcpy(deviceGraph.cliqueCore, deviceGraph.cliqueDegree, graph.n * sizeof(ui), cudaMemcpyDeviceToDevice));
 
     //density of full graph
-    thrust::device_vector<ui> dev_vec(cliqueData.status, cliqueData.status + tt);
-    ui currentCliques = thrust::count(dev_vec.begin(), dev_vec.end(), 1);
+    thrust::device_vector<int> dev_vec(cliqueData.status, cliqueData.status + t);
+    ui currentCliques = thrust::count(dev_vec.begin(), dev_vec.end(), -1);
 
     double currentDensity = static_cast<double>(currentCliques) / (graph.n - count);
 
@@ -201,8 +204,16 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
 
         }
 
+        chkerr(cudaMemcpy(&count, globalCount, sizeof(unsigned int), cudaMemcpyDeviceToHost));
+
+
+
+        level++;
+
+        thrust::device_vector<int> dev_vec2(cliqueData.status, cliqueData.status + t);
+
         if((graph.n - count)!=0){
-            currentCliques = thrust::count(dev_vec2.begin(), dev_vec2.end(), 1);
+            currentCliques = thrust::count(dev_vec2.begin(), dev_vec2.end(), -1);
             currentDensity = static_cast<double>(currentCliques) / (graph.n - count);
     
             if(currentDensity>=maxDensity){
@@ -217,6 +228,7 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
     
     
         }
+        cudaDeviceSynchronize();
 
     }
 
@@ -226,14 +238,13 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
 }
 
 
-void generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, densestCorePointer densestCore, ui coreSize, ui coreTotalCliques, double maxDensity){
-    memoryAllocationDensestCore(densestCore, coreSize, maxDensity , coreTotalCliques);
+ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, densestCorePointer &densestCore, ui *reverseMap, ui coreSize, ui coreTotalCliques, ui lowerBoundDensity){
+    memoryAllocationDensestCore(densestCore, coreSize, lowerBoundDensity , coreTotalCliques);
     ui *globalCount;
 
     chkerr(cudaMalloc((void**)&globalCount, sizeof(ui)));
     chkerr(cudaMemset(globalCount, 0, sizeof(ui)));
 
-    ui lowerBoundDensity = static_cast<ui>(std::ceil(maxDensity));
 
     generateDensestCore<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,densestCore,globalCount,graph.n,lowerBoundDensity,TOTAL_WARPS);
     cudaDeviceSynchronize();
@@ -244,11 +255,23 @@ void generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, de
     chkerr(cudaMemcpy(&edgeCountCore, densestCore.offset+coreSize , sizeof(ui), cudaMemcpyDeviceToHost));
     chkerr(cudaMalloc((void**)&(densestCore.neighbors), edgeCountCore * sizeof(ui)));
 
+    thrust::device_ptr<unsigned int> d_vertex_map_ptr(densestCore.mapping);
+
+    thrust::device_ptr<unsigned int> d_reverse_map_ptr(reverseMap);
+
+    thrust::device_vector<unsigned int> d_indices(coreSize);
+
+    thrust::sequence(d_indices.begin(), d_indices.end());
+
+    // Scatter indices into the reverse mapping array
+
+    thrust::scatter(d_indices.begin(), d_indices.end(), d_vertex_map_ptr, d_reverse_map_ptr);
+
     size_t sharedMemoryGenNeighCore =  WARPS_EACH_BLK * sizeof(ui);
-    generateNeighborDensestCore<<<BLK_NUMS, BLK_DIM,sharedMemoryGenNeighCore>>>(deviceGraph,densestCore,lowerBoundDensity,TOTAL_WARPS);
+    generateNeighborDensestCore<<<BLK_NUMS, BLK_DIM,sharedMemoryGenNeighCore>>>(deviceGraph,densestCore,reverseMap,lowerBoundDensity,TOTAL_WARPS);
     cudaDeviceSynchronize();
 
-
+    return edgeCountCore;
 
 }
 
@@ -267,6 +290,13 @@ int main(int argc, const char * argv[]) {
 
     // Need better way to do this
     ui t=10;
+
+    //Debug
+    cout << "filepath: " << filepath << endl;
+    cout << "motifPath: " << motifPath << endl;
+    cout <<"k: " << k << endl;
+    cout << "pSize: " << pSize << endl;
+    cout << "cpSize: " << cpSize << endl;
 
     Graph graph = Graph(filepath);
 
@@ -318,18 +348,39 @@ int main(int argc, const char * argv[]) {
 
     //Debug end
 
-    //TODO:  CLIQUE CORE DECOMPOSE
+    // CLIQUE CORE DECOMPOSE
     ui coreSize, coreTotalCliques,maxCore;
     double maxDensity;
     int argmax;
     cliqueCoreDecompose(graph,deviceGraph,cliqueData,maxCore, maxDensity, coreSize, coreTotalCliques,glBufferSize, k,  t, tt);
 
-    //TODO: LOCATE CORE
-    generateDensestCore(graph,deviceGraph,  densestCore, coreSize, coreTotalCliques,maxDensity);
+    //LOCATE CORE
+    ui *reverseMap;
+    chkerr(cudaMalloc((void**)&reverseMap, graph.n * sizeof(ui)));
+    cudaMemset(reverseMap, 0xFF, graph.n * sizeof(ui));
+    ui lowerBoundDensity = static_cast<ui>(std::ceil(maxDensity));
 
-    //TODO: LISTING AGAIN
+    ui edgecount = generateDensestCore(graph,deviceGraph,  densestCore, reverseMap, coreSize, coreTotalCliques,lowerBoundDensity);
+
+    //TODO: LISTING AGAIN not need added level as status of each clique to track the cores
+
 
     //TODO: EDGE PRUNING
+    ui *pruneStatus;
+
+    chkerr(cudaMalloc((void**)&pruneStatus, edgecount * sizeof(ui)));
+
+    thrust::device_ptr<ui> d_pruneStatus(pruneStatus);
+
+    // Fill the array with 1 using Thrust
+    thrust::fill(d_pruneStatus, d_pruneStatus + edgecount, 1);
+
+    pruneEdges<<<BLK_NUMS, BLK_DIM>>>( densestCore,  cliqueData,reverseMap, pruneStatus, t, tt,  k, lowerBoundDensity);
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Flush Partition data structure");
+
+
+
 
     //TODO: COMPONENT DECOMPOSE
 
