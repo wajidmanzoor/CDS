@@ -757,4 +757,42 @@ __global__ void generateNeighborAfterPrune(densestCorePointer densestCore ,ui *p
     }
 }
 
+__global__ void componentDecompose(ui *newOffset, ui *newNeighbors, ui *components, ui *changed, ui n, ui m, ui totalWarps) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int warpId = idx / warpSize;
+    int laneId = idx % warpSize;
+    bool threadChanged = false;
 
+    for(ui i = warpId; i < n; i += totalWarps) {
+        ui currentComp = components[i];
+        ui start = newOffset[i];
+        ui end = newOffset[i+1];
+        ui total = end - start;
+        
+        ui minNeighComp = currentComp;
+        
+        for (ui j = laneId; j < total; j += warpSize) {
+            ui neighComp = components[newNeighbors[start+j]];
+            minNeighComp = min(minNeighComp, neighComp);
+        }
+        
+        for (int offset = warpSize/2; offset > 0; offset /= 2) {
+            ui temp = __shfl_down_sync(0xFFFFFFFF, minNeighComp, offset);
+            minNeighComp = min(minNeighComp, temp);
+        }
+        
+        if (laneId == 0) {
+            if ( minNeighComp < currentComp) {
+                components[i] = minNeighComp;
+                threadChanged = true;
+            }
+        }
+        
+        __syncwarp();
+    }
+
+    bool warpChanged = __any_sync(0xFFFFFFFF, threadChanged);
+    if (warpChanged && laneId == 0) {
+        atomicAdd(changed, 1);
+    }
+}

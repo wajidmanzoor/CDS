@@ -4,7 +4,12 @@
 #include "./utils/cuda_utils.cuh"
 #include "./inc/gpuMemoryAllocation.cuh"
 #include "./inc/helpers.cuh"
+
 #include <thrust/count.h>
+#include <thrust/sort.h>
+#include <thrust/unique.h>
+#include <thrust/binary_search.h>
+
 
 
 
@@ -290,7 +295,7 @@ ui prune(densestCorePointer &densestCore, deviceCliquesPointer &cliqueData, ui *
 
     // Get out degree after prune
     chkerr(cudaMalloc((void**)&newOffset, (vertexCount+1) * sizeof(ui)));
-    chkerr(cudaMemset(newOffset, (vertexCount+1)  , sizeof(ui)));
+    chkerr(cudaMemset(newOffset, 0, (vertexCount+1)*sizeof(ui)));
 
 
     generateDegreeAfterPrune<<<BLK_NUMS, BLK_DIM>>>(densestCore , pruneStatus, newOffset, vertexCount , edgecount, TOTAL_WARPS);
@@ -312,6 +317,53 @@ ui prune(densestCorePointer &densestCore, deviceCliquesPointer &cliqueData, ui *
 
     return newEdgeCount;
     
+}
+
+
+void componentDecompose(deviceComponentPointers &conComp, ui *newOffset, ui *newNeighbors, ui vertexCount, ui edgecount){
+    ui *changed;
+    chkerr(cudaMalloc((void**)&changed, sizeof(ui)));
+    chkerr(cudaMemset(changed, 0 , sizeof(ui)));
+
+    thrust::device_vector<int> components(vertexCount);
+    thrust::sequence(components.begin(), components.end());
+
+    //int iter = 0;
+    //can be used to put a limit on num iters
+    ui hostChanged;
+    do{
+    chkerr(cudaMemset(changed, 0 , sizeof(ui)));
+    componentDecompose<<<BLK_NUMS, BLK_DIM>>>(newOffset, newNeighbors,components, changed, vertexCount, edgecount, TOTAL_WARPS);
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Coponenet Decompose");
+
+    chkerr(cudaMemcpy(&hostChanged,changed , sizeof(ui), cudaMemcpyDeviceToHost));
+
+    }while{ hostChanged>0};
+
+    //Vertices in Densest Core, use mapping to get actual verticies 
+    thrust::device_ptr<int> vertices(C.mapping);
+    thrust::sequence(vertices.begin(), vertices.end());
+
+    thrust::sort_by_key(components.begin(), components.end(), vertices.begin());
+
+
+    // unique component
+    thrust::device_vector<int> uniqueComponents(vertexCount);
+    auto new_end = thrust::unique_copy(components.begin(), components.end(), 
+                                   uniqueComponents.begin());
+    int totalComponents = new_end - uniqueComponents.begin();
+
+    //Create component offset 
+    thrust::device_ptr<int> componentOffsets(C.offset);
+    thrust::lower_bound(components.begin(), components.end(),
+                    uniqueComponents.begin(), uniqueComponents.begin() + totalComponents,
+                    componentOffsets.begin());
+    componentOffsets[totalComponents] = vertexCount;
+    
+
+    //TODO : new neighbor list, new neighbor offset 
+
 }
 
 

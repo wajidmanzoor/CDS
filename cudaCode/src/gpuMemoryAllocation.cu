@@ -55,6 +55,8 @@ void memoryAllocationComponent(deviceComponentPointers &C, ui n, ui m) {
     chkerr(cudaMalloc((void**)&(C.componentOffset), (n + 1) * sizeof(ui)));
     chkerr(cudaMemset(C.componentOffset, 0, (n + 1) * sizeof(ui)));
 
+    chkerr(cudaMalloc((void**)&(C.mapping), n * sizeof(ui)));
+
     chkerr(cudaMalloc((void**)&(C.offset), (n + 1) * sizeof(ui)));
     chkerr(cudaMemset(C.offset, 0, (n + 1) * sizeof(ui)));
 
