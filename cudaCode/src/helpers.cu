@@ -451,58 +451,67 @@ __global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cl
     ui regTail;
     ui i;
     if(threadIdx.x==0){
-        bufTail = bufTails[blockIdx.x];
-        base = 0;
-        glBuffer = glBuffers + blockIdx.x*glBufferSize;
-        assert(glBuffer!=NULL);
+    bufTail = bufTails[blockIdx.x];
+    base = 0;
+    glBuffer = glBuffers + blockIdx.x*glBufferSize;
+    assert(glBuffer!=NULL);
     }
 
     while(true){
-        __syncthreads();
-        if(base == bufTail) break; // all the threads will evaluate to true at same iteration
-        i = base + warpId;
-        regTail = bufTail;
-        __syncthreads();
+    __syncthreads();
+    if(base == bufTail) break; // all the threads will evaluate to true at same iteration
+    i = base + warpId;
+    regTail = bufTail;
+    __syncthreads();
 
-        if(i >= regTail) continue; // this warp won't have to do anything
+    if(i >= regTail) continue; // this warp won't have to do anything
 
-        if(threadIdx.x == 0){
-            base += WARPS_EACH_BLK;
-            if(regTail < base )
-            base = regTail;
-        }
-        //bufTail is incremented in the code below:
-        ui v = glBuffer[i];
+    if(threadIdx.x == 0){
+    base += WARPS_EACH_BLK;
+    if(regTail < base )
+    base = regTail;
+    }
+    //bufTail is incremented in the code below:
+    ui v = glBuffer[i];
 
 
-        __syncthreads();
-        for(ui j =laneId; j<tt; j+=warpSize){
+   __syncwarp();
+    for(ui j =laneId; j<tt; j+=warpSize){
+    //printf("warpId %d laneId %u vertex %u check %d t %d \n",warpId,i,v,cliqueData.trie[j],t);
 
-            if( (v == cliqueData.trie[j]) && (cliqueData.status[j] ==-1)){
+        if( (v == cliqueData.trie[j]) && (cliqueData.status[j] == -1)){
+          //printf("inside warpId %d laneId %u vertex %u check %d \n",warpId,i,v,cliqueData.trie[j]);
 
-                for(ui x =1;x<k;x++){
-                    ui u = cliqueData.trie[x*t+j];
-                    int a = atomicSub(&G.cliqueCore[u],1);
-                    if(a == level+1){
-                        ui loc = atomicAdd(&bufTail, 1);
-                        glBuffer[loc] = u;
+            for(ui x =1;x<k;x++){
+                ui u = cliqueData.trie[x*t+j];
+           // printf("inside warpId %d laneId %u vertex %u check %d u %d loc %d \n",warpId,j,v,cliqueData.trie[j],u,x*t+j);
 
-                    }
-                    if(a <= level){
-                        atomicAdd(&G.cliqueCore[u], 1);
-                    }
+
+                int a = atomicSub(&G.cliqueCore[u],1);
+                if(a == level+1){
+                    ui loc = atomicAdd(&bufTail, 1);
+                    glBuffer[loc] = u;
+
                 }
-                cliqueData.status[j] = level;
-
-
+                if(a <= level){
+                    atomicAdd(&G.cliqueCore[u], 1);
+                }
+               /* if(G.cliqueCore[u]<0){
+                  G.cliqueCore[u] = 0;
+                }*/
             }
-        }
+            cliqueData.status[j] = level;
 
-        __syncthreads();
-        if(threadIdx.x == 0 && bufTail>0){
-            atomicAdd(globalCount, 1); // atomic since contention among blocks
+
         }
     }
+
+    __syncwarp();
+    if(laneId == 0 && bufTail>0){
+      //printf("warpId %d thid %d buffTail %d v %d base %d \n",warpId,threadIdx.x, bufTail,v,base);
+      atomicAdd(globalCount, 1); // atomic since contention among blocks
+    }
+}
 }
 
 __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer cliqueData, ui *bufTails,ui *glBuffers, ui *globalCount, ui glBufferSize, ui n, ui level, ui k, ui t, ui tt){
@@ -687,5 +696,65 @@ __global__ void pruneEdges(densestCorePointer densestCore, deviceCliquesPointer 
     }
 }
 
+
+__global__ void generateDegreeAfterPrune(densestCorePointer densestCore ,ui *pruneStatus, ui *newOffset, ui n, ui m, ui totalWarps) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int warpId = idx / warpSize;
+    int laneId = idx % warpSize;
+
+    for(ui i = warpId; i < n; i += totalWarps) {
+        ui start = D.offset[i];
+        ui end = D.offset[i+1];
+        ui total = end - start;
+        int count = 0;
+        for(int j = laneId; j < total; j += warpSize) {
+            if(pruneStatus[start + j]) {
+                count++;
+            }
+        }
+        
+        for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+            count += __shfl_down_sync(0xFFFFFFFF, count, offset);
+        }
+
+        if(laneId == 0) {
+            newOffset[i+1] = count;
+        }
+    }
+}
+
+
+__global__ void generateNeighborAfterPrune(densestCorePointer densestCore ,ui *pruneStatus, ui *newOffset, ui *newNeighbors,ui n, ui m, ui totalWarps) {
+
+    extern __shared__ char sharedMemory[];
+    ui sizeOffset = 0;
+
+    ui *counter = (ui *)(sharedMemory + sizeOffset);
+
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int warpId = idx / warpSize;
+    int laneId = idx % warpSize;
+
+    for(ui i = warpId; i < n; i += totalWarps) {
+        if(laneId==0){
+          counter[threadIdx.x / warpSize] = newOffset[i];
+        }
+        __syncwarp();
+        ui start = newOffset[i];
+        ui end = newOffset[i+1];
+        ui total = end - start;
+        ui neigh;
+        for(int j = laneId; j < total; j += warpSize) {
+            neigh = D.neighbors[start + j];
+
+            if(pruneStatus[start + j]) {
+                int loc = atomicAdd(&counter[threadIdx.x / warpSize], 1);
+                newNeighbors[loc] = neigh;
+
+            }
+        }
+      __syncwarp();
+    }
+}
 
 
