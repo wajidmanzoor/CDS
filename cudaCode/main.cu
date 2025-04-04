@@ -4,6 +4,8 @@
 #include "./utils/cuda_utils.cuh"
 #include "./inc/gpuMemoryAllocation.cuh"
 #include "./inc/helpers.cuh"
+#include <thrust/count.h>
+
 
 
 void generateDAG(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGpointer& deviceDAG , vector<ui> listingOrder){
@@ -142,7 +144,7 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
     //cudaDeviceSynchronize();
     //CUDA_CHECK_ERROR("Sort Trie Data Structure");
 
-    cudaFree(totalCliques)
+    cudaFree(totalCliques);
     return tt;
 }
 
@@ -159,14 +161,14 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
     chkerr(cudaMemset(globalCount, 0, sizeof(ui)));
     cudaDeviceSynchronize();
 
-//    chkerr(cudaMemset(glBuffers, 0, BLK_NUMS*glBufferSize*sizeof(ui)));
+
 
     chkerr(cudaMemcpy(deviceGraph.cliqueCore, deviceGraph.cliqueDegree, graph.n * sizeof(ui), cudaMemcpyDeviceToDevice));
 
-    //density of full graph
-    thrust::device_vector<int> dev_vec(cliqueData.status, cliqueData.status + t);
-    ui currentCliques = thrust::count(dev_vec.begin(), dev_vec.end(), -1);
 
+    thrust::device_vector<int> dev_vec(cliqueData.status, cliqueData.status + t);
+
+    ui currentCliques = thrust::count(dev_vec.begin(), dev_vec.end(), -1);
     double currentDensity = static_cast<double>(currentCliques) / (graph.n - count);
 
     maxDensity = currentDensity;
@@ -174,67 +176,63 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
     coreTotalCliques = currentCliques;
     coreSize = graph.n;
 
-    while(count < graph.n){
-        cudaMemset(bufTails, 0, sizeof(unsigned int)*BLK_NUMS);
 
-        // Select nodes whoes current degree is level, that means they should be removed as part of the level core 
+    while(count < graph.n){
+        cudaMemset(bufTails, 0, sizeof(ui)*BLK_NUMS);
+
+        // Select nodes whoes current degree is level, that means they should be removed as part of the level core
         selectNodes<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, bufTails, glBuffers, glBufferSize, graph.n, level);
         cudaDeviceSynchronize();
-        CUDA_CHECK_ERROR("Select Node of Clique Core Decompose");
 
-        
         //Total number of verticies in buffer
         thrust::device_vector<ui> dev_vec1(bufTails, bufTails + BLK_NUMS);
         ui sum = thrust::reduce(dev_vec1.begin(), dev_vec1.end(), 0, thrust::plus<ui>());
         cout<<"sum "<<sum;
         cudaDeviceSynchronize();
 
-        //Bases on total vertices device to either use Warp or Block to process one vertex and its cliques
-        if(true){
-            processNodesByWarp<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, t, tt);
-            cudaDeviceSynchronize();
-            CUDA_CHECK_ERROR("Process Node by Warp  of Clique Core Decompose");
 
-        }else{
-            processNodesByBlock<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, t, tt);
-            cudaDeviceSynchronize();
-            CUDA_CHECK_ERROR("Process Node by Block of Clique Core Decompose");
 
-            
+        processNodesByWarp<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, t, tt);
+        cudaDeviceSynchronize();
 
+        //debug
+        chkerr(cudaMemcpy(h_coreCliques, deviceGraph.cliqueCore, graph.n * sizeof(int), cudaMemcpyDeviceToHost));
+        cout<<endl<<"Core Cliques ";
+        for(int i = 0; i < graph.n; i++){
+            cout<<h_coreCliques[i]<<" ";
         }
+        cout<<endl;
+        //debug
 
         chkerr(cudaMemcpy(&count, globalCount, sizeof(unsigned int), cudaMemcpyDeviceToHost));
 
-
-
         level++;
-
         thrust::device_vector<int> dev_vec2(cliqueData.status, cliqueData.status + t);
 
-        if((graph.n - count)!=0){
-            currentCliques = thrust::count(dev_vec2.begin(), dev_vec2.end(), -1);
-            currentDensity = static_cast<double>(currentCliques) / (graph.n - count);
-    
-            if(currentDensity>=maxDensity){
-                maxDensity = currentDensity;
-                maxCore = level;
-                coreTotalCliques = currentCliques;
-                coreSize = graph.n-count;
-    
-            }
-            cout<<"Level "<<level<<" current "<<currentDensity<<" max "<<maxDensity<<" size "<<coreSize<<" graph "<<graph.n<<" cliques "<<currentCliques<<endl;
-    
-    
-    
+
+       if((graph.n - count)!=0){
+        currentCliques = thrust::count(dev_vec2.begin(), dev_vec2.end(), -1);
+        currentDensity = static_cast<double>(currentCliques) / (graph.n - count);
+
+        if(currentDensity>=maxDensity){
+            maxDensity = currentDensity;
+            maxCore = level;
+            coreTotalCliques = currentCliques;
+            coreSize = graph.n-count;
+
         }
+        
+    
+
+       }
+
         cudaDeviceSynchronize();
 
     }
-
     cudaFree(globalCount);
     cudaFree(bufTails);
     cudaFree(glBuffers);
+
 }
 
 
@@ -274,6 +272,48 @@ ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, dens
     return edgeCountCore;
 
 }
+
+ui prune(densestCorePointer &densestCore, deviceCliquesPointer &cliqueData, ui *pruneStatus, ui *reverseMap, ui *newOffset, ui *newNeighbors, ui vertexCount, ui edgecount, ui k, ui t, ui t, ui lowerBoundDensity){
+    
+    //Prune
+    chkerr(cudaMalloc((void**)&pruneStatus, edgecount * sizeof(ui)));
+
+    thrust::device_ptr<ui> d_pruneStatus(pruneStatus);
+
+    // Fill the array with 1 using Thrust
+    thrust::fill(d_pruneStatus, d_pruneStatus + edgecount, 1);
+
+    pruneEdges<<<BLK_NUMS, BLK_DIM>>>( densestCore,  cliqueData,reverseMap, pruneStatus, t, tt,  k, lowerBoundDensity);
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Get prune status of each edge");
+
+
+    // Get out degree after prune
+    chkerr(cudaMalloc((void**)&newOffset, (vertexCount+1) * sizeof(ui)));
+    chkerr(cudaMemset(newOffset, (vertexCount+1)  , sizeof(ui)));
+
+
+    generateDegreeAfterPrune<<<BLK_NUMS, BLK_DIM>>>(densestCore , pruneStatus, newOffset, vertexCount , edgecount, TOTAL_WARPS);
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Generate Degree after pruning");
+
+    // cummulative sum offset
+    thrust::inclusive_scan(thrust::device_ptr<ui>(newOffset), thrust::device_ptr<ui>(newOffset + vertexCount + 1), thrust::device_ptr<ui>(newOffset));
+
+    ui newEdgeCount;
+    chkerr(cudaMemcpy(&newEdgeCount, newOffset+ vertexCount , sizeof(ui), cudaMemcpyDeviceToHost));
+    chkerr(cudaMalloc((void**)&(newNeighbors), newEdgeCount * sizeof(ui)));
+
+    // Write neighbors of after output
+    size_t sharedMemoryGenNeig =  WARPS_EACH_BLK * sizeof(ui);
+    generateNeighborAfterPrune<<<BLK_NUMS, BLK_DIM,sharedMemoryGenNeig>>>(densestCore , pruneStatus, newOffset, newNeighbors, vertexCount, edgecount , TOTAL_WARPS);
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Generate Neighbor after prune");
+
+    return newEdgeCount;
+    
+}
+
 
 int main(int argc, const char * argv[]) {
     if (argc != 7) {
@@ -351,7 +391,7 @@ int main(int argc, const char * argv[]) {
     // CLIQUE CORE DECOMPOSE
     ui coreSize, coreTotalCliques,maxCore;
     double maxDensity;
-    int argmax;
+    cout<<endl<<"BEFORE DECOMPOSE"<<endl;
     cliqueCoreDecompose(graph,deviceGraph,cliqueData,maxCore, maxDensity, coreSize, coreTotalCliques,glBufferSize, k,  t, tt);
 
     //LOCATE CORE
@@ -367,20 +407,13 @@ int main(int argc, const char * argv[]) {
 
     //TODO: EDGE PRUNING
     ui *pruneStatus;
+    ui *newOffset;
+    ui *newNeighbors;
+    ui vertexCount;
+    chkerr(cudaMemcpy(&vertexCount, densestCore.n, sizeof(ui), cudaMemcpyDeviceToHost));
 
-    chkerr(cudaMalloc((void**)&pruneStatus, edgecount * sizeof(ui)));
-
-    thrust::device_ptr<ui> d_pruneStatus(pruneStatus);
-
-    // Fill the array with 1 using Thrust
-    thrust::fill(d_pruneStatus, d_pruneStatus + edgecount, 1);
-
-    pruneEdges<<<BLK_NUMS, BLK_DIM>>>( densestCore,  cliqueData,reverseMap, pruneStatus, t, tt,  k, lowerBoundDensity);
-    cudaDeviceSynchronize();
-    CUDA_CHECK_ERROR("Flush Partition data structure");
-
-
-
+    
+    ui newEdgeCount = prune(densestCore, cliqueData, pruneStatus, reverseMap, newOffset, newNeighbors, vertexCount, edgecount, k, t, t, lowerBoundDensity);
 
     //TODO: COMPONENT DECOMPOSE
 
