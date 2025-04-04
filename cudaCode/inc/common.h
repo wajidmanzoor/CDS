@@ -67,6 +67,7 @@ typedef struct  {
 typedef struct  {
 
     ui *componentOffset;
+    ui *mapping;
     ui *offset;
     ui *neighbors;
     
