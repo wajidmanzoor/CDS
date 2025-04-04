@@ -27,3 +27,5 @@ __global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePo
 
 //Kernel function to prune edges
 __global__ void pruneEdges(densestCorePointer densestCore, deviceCliquesPointer cliqueData, ui *reversemap, ui *pruneStatus, ui t, ui tt, ui k, ui level );
+__global__ void generateDegreeAfterPrune(densestCorePointer densestCore ,ui *pruneStatus, ui *newOffset, ui n, ui m, ui totalWarps);
+__global__ void generateNeighborAfterPrune(densestCorePointer densestCore ,ui *pruneStatus, ui *newOffset, ui *newNeighbors,ui n, ui m, ui totalWarps);
