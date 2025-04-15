@@ -650,7 +650,7 @@ __global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePo
     }
 }
 
-__global__ void pruneEdges(densestCorePointer densestCore, deviceCliquesPointer cliqueData, ui *reversemap, ui *pruneStatus,ui t, ui tt, ui k, ui level ){
+__global__ void pruneEdges(densestCorePointer densestCore, deviceCliquesPointer cliqueData, ui *pruneStatus,ui t, ui tt, ui k, ui level ){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
@@ -662,13 +662,13 @@ __global__ void pruneEdges(densestCorePointer densestCore, deviceCliquesPointer 
             for(ui iter =0; iter< k ; iter ++){
                 // v should be mapped
                 ui u_ = ((iter)%k)*t+i;
-                ui u  =  reversemap[cliqueData.trie[u_]];
+                ui u  =  densestCore.reverseMap[cliqueData.trie[u_]];
                 for(ui j = 0; j < k; j++){
                     ui v_ = ((j)%k)*t+i;
 
 
                     if(v_!=u_){
-                        int v = reversemap[cliqueData.trie[v_]];
+                        int v = densestCore.reverseMap[cliqueData.trie[v_]];
 
 
                         // Update u-v edge status
@@ -696,23 +696,22 @@ __global__ void pruneEdges(densestCorePointer densestCore, deviceCliquesPointer 
     }
 }
 
-
 __global__ void generateDegreeAfterPrune(densestCorePointer densestCore ,ui *pruneStatus, ui *newOffset, ui n, ui m, ui totalWarps) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
 
     for(ui i = warpId; i < n; i += totalWarps) {
-        ui start = D.offset[i];
-        ui end = D.offset[i+1];
+        ui start = densestCore.offset[i];
+        ui end = densestCore.offset[i+1];
         ui total = end - start;
         int count = 0;
         for(int j = laneId; j < total; j += warpSize) {
-            if(pruneStatus[start + j]) {
+            if(!pruneStatus[start + j]) {
                 count++;
             }
         }
-        
+
         for (int offset = warpSize / 2; offset > 0; offset /= 2) {
             count += __shfl_down_sync(0xFFFFFFFF, count, offset);
         }
@@ -722,7 +721,6 @@ __global__ void generateDegreeAfterPrune(densestCorePointer densestCore ,ui *pru
         }
     }
 }
-
 
 __global__ void generateNeighborAfterPrune(densestCorePointer densestCore ,ui *pruneStatus, ui *newOffset, ui *newNeighbors,ui n, ui m, ui totalWarps) {
 
@@ -740,14 +738,14 @@ __global__ void generateNeighborAfterPrune(densestCorePointer densestCore ,ui *p
           counter[threadIdx.x / warpSize] = newOffset[i];
         }
         __syncwarp();
-        ui start = newOffset[i];
-        ui end = newOffset[i+1];
+        ui start = densestCore.offset[i];
+        ui end = densestCore.offset[i+1];
         ui total = end - start;
         ui neigh;
         for(int j = laneId; j < total; j += warpSize) {
-            neigh = D.neighbors[start + j];
+            neigh = densestCore.neighbors[start + j];
 
-            if(pruneStatus[start + j]) {
+            if(!pruneStatus[start + j]) {
                 int loc = atomicAdd(&counter[threadIdx.x / warpSize], 1);
                 newNeighbors[loc] = neigh;
 
@@ -757,37 +755,39 @@ __global__ void generateNeighborAfterPrune(densestCorePointer densestCore ,ui *p
     }
 }
 
-__global__ void componentDecompose(ui *newOffset, ui *newNeighbors, ui *components, ui *changed, ui n, ui m, ui totalWarps) {
+__global__ void componentDecomposek(deviceComponentPointers conComp, devicePrunedNeighbors prunedNeighbors, ui *changed, ui n, ui m, ui totalWarps) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
     bool threadChanged = false;
 
     for(ui i = warpId; i < n; i += totalWarps) {
-        ui currentComp = components[i];
-        ui start = newOffset[i];
-        ui end = newOffset[i+1];
+        ui currentComp = conComp.components[i];
+        ui start = prunedNeighbors.newOffset[i];
+        ui end = prunedNeighbors.newOffset[i+1];
         ui total = end - start;
-        
+        //printf("warpid %d laneId %d start %d end %d total %d cc %d \n",warpId,laneId,start,end,total,currentComp);
+
         ui minNeighComp = currentComp;
-        
+
         for (ui j = laneId; j < total; j += warpSize) {
-            ui neighComp = components[newNeighbors[start+j]];
+            ui neighComp = conComp.components[prunedNeighbors.newNeighbors[start+j]];
             minNeighComp = min(minNeighComp, neighComp);
+            //printf("warp Id %d laneid %d cc %d nc %d mc %d \n",warpId,laneId,currentComp,neighComp,minNeighComp);
         }
-        
+
         for (int offset = warpSize/2; offset > 0; offset /= 2) {
             ui temp = __shfl_down_sync(0xFFFFFFFF, minNeighComp, offset);
             minNeighComp = min(minNeighComp, temp);
         }
-        
+
         if (laneId == 0) {
             if ( minNeighComp < currentComp) {
-                components[i] = minNeighComp;
+                conComp.components[i] = minNeighComp;
                 threadChanged = true;
             }
         }
-        
+
         __syncwarp();
     }
 
@@ -796,3 +796,36 @@ __global__ void componentDecompose(ui *newOffset, ui *newNeighbors, ui *componen
         atomicAdd(changed, 1);
     }
 }
+
+/*__global__ void dynamicExact(deviceComponentPointers conComp,ui *newOffset,ui *newNeighbors, ui *components, ui n, ui m,ui totalComponents, ui totalWarps){
+
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int warpId = idx / warpSize;
+    int laneId = idx % warpSize;
+    bool threadChanged = false;
+
+    for(ui i = warpId; i < totalComponents; i += totalWarps){
+        ui startComp = conComp.componentOffset[i];;
+        ui endComp = conComp..componentOffset[i+1];
+        ui total = endComp-startComp;
+
+
+
+        //Create Flow network
+
+
+        //get lower bound upper bound and bais
+
+        //create spanning tree for forward edges
+
+        //run algo
+
+        // run algo again with backward edges 
+
+        //atomic max for max density 
+
+
+
+    }
+
+}*/

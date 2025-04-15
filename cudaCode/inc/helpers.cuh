@@ -26,6 +26,9 @@ __global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer de
 __global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui *reverseMap, ui density, ui totalWarps);
 
 //Kernel function to prune edges
-__global__ void pruneEdges(densestCorePointer densestCore, deviceCliquesPointer cliqueData, ui *reversemap, ui *pruneStatus, ui t, ui tt, ui k, ui level );
+_global__ void pruneEdges(densestCorePointer densestCore, deviceCliquesPointer cliqueData, ui *pruneStatus, ui t, ui tt, ui k, ui level );
 __global__ void generateDegreeAfterPrune(densestCorePointer densestCore ,ui *pruneStatus, ui *newOffset, ui n, ui m, ui totalWarps);
 __global__ void generateNeighborAfterPrune(densestCorePointer densestCore ,ui *pruneStatus, ui *newOffset, ui *newNeighbors,ui n, ui m, ui totalWarps);
+
+//Component Decompose
+__global__ void componentDecomposek(deviceComponentPointers conComp, devicePrunedNeighbors prunedNeighbors,ui *changed, ui n, ui m, ui totalWarps);
