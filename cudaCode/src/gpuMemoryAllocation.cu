@@ -156,6 +156,16 @@ void memoryAllocationPrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors, ui
     cudaDeviceSynchronize();
 }
 
+void memoryAllocationFlowNetwork(deviceFlowNetworkPointers &flowNetwork, ui size){
+    chkerr(cudaMalloc((void**)&(flowNetwork.toEdge), size * sizeof(ui)));
+
+    chkerr(cudaMalloc((void**)&(flowNetwork.capacity), size * sizeof(capacity)));
+    chkerr(cudaMalloc((void**)&(flowNetwork.flow), size* sizeof(capacity)));
+
+    cudaDeviceSynchronize();
+
+}
+
 /*void freeMotif(deviceMotifPointers &M) {
     chkerr(cudaFree(M.adjacencyMatrix));
 }*/
@@ -221,5 +231,13 @@ void freePrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors){
     chkerr(cudaFree(prunedNeighbors.newOffset));
     chkerr(cudaFree(prunedNeighbors.newNeighbors));
     chkerr(cudaFree(prunedNeighbors.pruneStatus));
+}
+
+void freeFlowNetwork(deviceFlowNetworkPointers &flowNetwork){
+    chkerr(cudaFree(flowNetwork.toEdge));
+    chkerr(cudaFree(flowNetwork.capacity));
+    chkerr(cudaFree(flowNetwork.flow));
+    cudaDeviceSynchronize();
+
 }
 
