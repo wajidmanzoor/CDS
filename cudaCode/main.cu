@@ -456,29 +456,27 @@ int main(int argc, const char * argv[]) {
     cliqueCoreDecompose(graph,deviceGraph,cliqueData,maxCore, maxDensity, coreSize, coreTotalCliques,glBufferSize, k,  t, tt);
 
     //LOCATE CORE
-    ui *reverseMap;
-    chkerr(cudaMalloc((void**)&reverseMap, graph.n * sizeof(ui)));
-    cudaMemset(reverseMap, 0xFF, graph.n * sizeof(ui));
     ui lowerBoundDensity = static_cast<ui>(std::ceil(maxDensity));
-
-    ui edgecount = generateDensestCore(graph,deviceGraph,  densestCore, reverseMap, coreSize, coreTotalCliques,lowerBoundDensity);
-
+    ui edgecount = generateDensestCore(graph,deviceGraph,  densestCore, coreSize, coreTotalCliques,lowerBoundDensity);
     //TODO: LISTING AGAIN not need added level as status of each clique to track the cores
 
 
     //TODO: EDGE PRUNING
-    ui *pruneStatus;
-    ui *newOffset;
-    ui *newNeighbors;
     ui vertexCount;
     chkerr(cudaMemcpy(&vertexCount, densestCore.n, sizeof(ui), cudaMemcpyDeviceToHost));
 
+    ui newEdgeCount = prune(densestCore, cliqueData, prunedNeighbors, vertexCount, edgecount, k, t, tt, lowerBoundDensity);
     
-    ui newEdgeCount = prune(densestCore, cliqueData, pruneStatus, reverseMap, newOffset, newNeighbors, vertexCount, edgecount, k, t, t, lowerBoundDensity);
-
     //TODO: COMPONENT DECOMPOSE
+    memoryAllocationComponent(conComp, vertexCount , newEdgeCount);
+    int totalComponents = componentDecompose(conComp, prunedNeighbors, vertexCount, newEdgeCount);
+
+
 
     //TODO: DYNAMIC CORE EXACT
+
+    cudaDeviceSynchronize();
+
     freTrie(cliqueData);
     freeGraph(deviceGraph);
     return 0;
