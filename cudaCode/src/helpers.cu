@@ -616,7 +616,7 @@ __global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer de
     }
 }
 
-__global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui *reverseMap, ui density, ui totalWarps) {
+__global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui density, ui totalWarps) {
 
     extern __shared__ char sharedMemory[];
     ui sizeOffset = 0;
@@ -642,7 +642,8 @@ __global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePo
 
             if(G.cliqueCore[neigh] >= density) {
                 int loc = atomicAdd(&counter[threadIdx.x / warpSize], 1);
-                densestCore.neighbors[loc] = reverseMap[neigh];
+
+                densestCore.neighbors[loc] = densestCore.reverseMap[neigh];
 
             }
         }
