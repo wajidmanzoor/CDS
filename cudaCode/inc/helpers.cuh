@@ -23,7 +23,8 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
 
 //kernel function to locate the densest core 
 __global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer densestCore,ui *globalCount, ui n, ui density, ui totalWarps);
-__global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui *reverseMap, ui density, ui totalWarps);
+__global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui density, ui totalWarps);
+
 
 //Kernel function to prune edges
 _global__ void pruneEdges(densestCorePointer densestCore, deviceCliquesPointer cliqueData, ui *pruneStatus, ui t, ui tt, ui k, ui level );
