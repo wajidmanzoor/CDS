@@ -829,9 +829,6 @@ __global__ void rearrangeCliqueData(deviceComponentPointers conComp,deviceClique
         
     }
 
-
-
-
 }
 
 __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter, ui *globalCount, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui alpha) {
@@ -893,7 +890,7 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
 }
 
 
-__global__ void createPaths(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, ui totalWarps, int totalComponents, ui k, ui alpha){
+/*__global__ void createPaths(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, ui totalWarps, int totalComponents, ui k, ui alpha){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
@@ -905,7 +902,7 @@ __global__ void createPaths(deviceFlowNetworkPointers flowNetwork, deviceCompone
 
     }
 
-}
+}*/
 
 
 
