@@ -316,53 +316,58 @@ ui prune(densestCorePointer &densestCore, deviceCliquesPointer &cliqueData, devi
     return newEdgeCount;
 }
 
-void componentDecompose(deviceComponentPointers &conComp, ui *newOffset, ui *newNeighbors, ui vertexCount, ui edgecount){
+int componentDecompose(deviceComponentPointers &conComp,devicePrunedNeighbors &prunedNeighbors, ui vertexCount, ui edgecount){
+
     ui *changed;
     chkerr(cudaMalloc((void**)&changed, sizeof(ui)));
     chkerr(cudaMemset(changed, 0 , sizeof(ui)));
 
-    int *component;
-    cudaMalloc((void**)&component, vertexCount * sizeof(int));
-
-    thrust::device_ptr<int> components = thrust::device_pointer_cast(component);
+    thrust::device_ptr<ui> components = thrust::device_pointer_cast(conComp.components);
     thrust::sequence(components, components + vertexCount);
 
     //int iter = 0;
     //can be used to put a limit on num iters
     ui hostChanged;
     do{
-    chkerr(cudaMemset(changed, 0 , sizeof(ui)));
-    componentDecompose<<<BLK_NUMS, BLK_DIM>>>(newOffset, newNeighbors,component, changed, vertexCount, edgecount, TOTAL_WARPS);
-    cudaDeviceSynchronize();
-    CUDA_CHECK_ERROR("Coponenet Decompose");
+        chkerr(cudaMemset(changed, 0 , sizeof(ui)));
+        componentDecomposek<<<BLK_NUMS, BLK_DIM>>>(conComp, prunedNeighbors, changed, vertexCount, edgecount, TOTAL_WARPS);
+        cudaDeviceSynchronize();
+        CUDA_CHECK_ERROR("Coponenet Decompose");
 
-    chkerr(cudaMemcpy(&hostChanged,changed , sizeof(ui), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(&hostChanged,changed , sizeof(ui), cudaMemcpyDeviceToHost));
 
-    }while{ hostChanged>0};
+    }while(hostChanged>0);
 
-    //Vertices in Densest Core, use mapping to get actual verticies 
-    thrust::device_ptr<int> vertices(C.mapping);
+    //Vertices in Densest Core, use mapping to get actual verticies
+    thrust::device_ptr<ui> vertices(densestCore.mapping);
 
-    thrust::sort_by_key(components.begin(), components.end(), vertices.begin());
+    thrust::sequence(thrust::device_pointer_cast(conComp.mapping), thrust::device_pointer_cast(conComp.mapping + vertexCount));
+
+    thrust::sort_by_key(
+      components,
+      components + vertexCount,
+      thrust::device_pointer_cast(conComp.mapping) 
+    );
+
 
 
     // unique component
     thrust::device_vector<int> uniqueComponents(vertexCount);
-    auto new_end = thrust::unique_copy(components.begin(), components.end(), 
+    auto new_end = thrust::unique_copy(components , components + vertexCount,
                                    uniqueComponents.begin());
     int totalComponents = new_end - uniqueComponents.begin();
 
-    //Create component offset 
-    thrust::device_ptr<int> componentOffsets(C.componentOffset);
-    thrust::lower_bound(components.begin(), components.end(),
+    //Create component offset
+    thrust::device_ptr<ui> componentOffsets(conComp.componentOffset);
+    thrust::lower_bound(components , components + vertexCount,
                     uniqueComponents.begin(), uniqueComponents.begin() + totalComponents,
-                    componentOffsets.begin());
+                    componentOffsets);
     componentOffsets[totalComponents] = vertexCount;
-    
 
-    //TODO : new neighbor list, new neighbor offset 
+    return totalComponents;
 
 }
+
 
 
 int main(int argc, const char * argv[]) {
