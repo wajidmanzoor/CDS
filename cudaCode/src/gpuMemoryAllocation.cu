@@ -54,18 +54,8 @@ void memoryAllocationDAG(deviceDAGpointer &D, ui n, ui m) {
 void memoryAllocationComponent(deviceComponentPointers &C, ui n, ui m) {
     chkerr(cudaMalloc((void**)&(C.componentOffset), (n + 1) * sizeof(ui)));
     chkerr(cudaMemset(C.componentOffset, 0, (n + 1) * sizeof(ui)));
-
+    chkerr(cudaMalloc((void**)&(C.components), n * sizeof(ui)));
     chkerr(cudaMalloc((void**)&(C.mapping), n * sizeof(ui)));
-
-    chkerr(cudaMalloc((void**)&(C.offset), (n + 1) * sizeof(ui)));
-    chkerr(cudaMemset(C.offset, 0, (n + 1) * sizeof(ui)));
-
-    chkerr(cudaMalloc((void**)&(C.neighbors), (2 * m) * sizeof(ui)));
-    chkerr(cudaMalloc((void**)&(C.cliqueDegree), n * sizeof(ui)));
-    chkerr(cudaMalloc((void**)&(C.cliqueCore), n * sizeof(ui)));
-    chkerr(cudaMalloc((void**)&(C.density), n * sizeof(double)));
-    chkerr(cudaMalloc((void**)&(C.motifCount), n * sizeof(ui)));
-    chkerr(cudaMalloc((void**)&(C.cliqueCorePeelSequence), n * sizeof(ui)));
     cudaDeviceSynchronize();
 }
 
@@ -136,10 +126,13 @@ void memoryAllocationDensestCore(densestCorePointer &C, ui n, ui density, ui tot
 
     chkerr(cudaMalloc((void**)&(C.n), sizeof(ui)));
     chkerr(cudaMemcpy(C.n, &n, sizeof(ui), cudaMemcpyHostToDevice));
-
+    chkerr(cudaMalloc((void**)&(C.m), sizeof(ui)));
     
     chkerr(cudaMalloc((void**)&(C.totalCliques), sizeof(ui)));
     chkerr(cudaMemcpy(C.totalCliques, &totalCliques, sizeof(ui), cudaMemcpyHostToDevice));  
+    chkerr(cudaMalloc((void**)&(C.reverseMap), n * sizeof(ui)));
+    cudaDeviceSynchronize();
+
 }
 
 
@@ -155,6 +148,14 @@ void freeGraph(deviceGraphPointers &G) {
     chkerr(cudaFree(G.motifCount));
 }
 
+void memoryAllocationPrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors, ui n, ui m){
+    chkerr(cudaMalloc((void**)&(prunedNeighbors.newOffset), (n+1) * sizeof(ui)));
+    chkerr(cudaMemset(prunedNeighbors.newOffset, 0, (n+1)* sizeof(ui)));
+
+    chkerr(cudaMalloc((void**)&(prunedNeighbors.pruneStatus), (2 * m) * sizeof(ui)));
+    cudaDeviceSynchronize();
+}
+
 /*void freeMotif(deviceMotifPointers &M) {
     chkerr(cudaFree(M.adjacencyMatrix));
 }*/
@@ -162,13 +163,9 @@ void freeGraph(deviceGraphPointers &G) {
 
 void freeComponents(deviceComponentPointers &C) {
     chkerr(cudaFree(C.componentOffset));
-    chkerr(cudaFree(C.offset));
-    chkerr(cudaFree(C.neighbors));
-    chkerr(cudaFree(C.cliqueDegree));
-    chkerr(cudaFree(C.cliqueCore));
-    chkerr(cudaFree(C.density));
-    chkerr(cudaFree(C.motifCount));
-    chkerr(cudaFree(C.cliqueCorePeelSequence));
+    chkerr(cudaFree(C.components));
+    chkerr(cudaFree(C.mapping));
+
 }
 
 void freeResults(deviceResultpointer &R) {
@@ -217,5 +214,11 @@ void freeDensestCore(densestCorePointer &C){
     chkerr(cudaFree(C.cliqueDegree));
     //chkerr(cudaFree(C.cliqueCore));
  
+}
+
+void freePrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors){
+    chkerr(cudaFree(prunedNeighbors.newOffset));
+    chkerr(cudaFree(prunedNeighbors.newNeighbors));
+    chkerr(cudaFree(prunedNeighbors.pruneStatus));
 }
 
