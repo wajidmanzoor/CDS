@@ -162,6 +162,7 @@ void memoryAllocationPrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors, ui
 
 
 void freeComponents(deviceComponentPointers &C) {
+    chkerr(cudaFree(C.componentTotal));
     chkerr(cudaFree(C.componentOffset));
     chkerr(cudaFree(C.components));
     chkerr(cudaFree(C.mapping));
@@ -205,6 +206,7 @@ void freeLevelData(cliqueLevelDataPointer &L) {
 
 void freeDensestCore(densestCorePointer &C){
     chkerr(cudaFree(C.mapping));
+    chkerr(cudaFree(c.reverseMap));
     chkerr(cudaFree(C.offset));
     chkerr(cudaFree(C.neighbors));
     chkerr(cudaFree(C.density));
@@ -212,7 +214,6 @@ void freeDensestCore(densestCorePointer &C){
     chkerr(cudaFree(C.m));
     chkerr(cudaFree(C.totalCliques));
     chkerr(cudaFree(C.cliqueDegree));
-    //chkerr(cudaFree(C.cliqueCore));
  
 }
 
