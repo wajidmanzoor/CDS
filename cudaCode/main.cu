@@ -389,47 +389,48 @@ int componentDecompose(deviceComponentPointers &conComp,devicePrunedNeighbors &p
 }
 
 void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &prunedNeighbors,deviceCliquesPointer &cliqueData, deviceCliquesPointer &finalCliqueData, vertexCount, ui edgecount, int totalComponents){
-    ui *upperBound, *lowerBound;
-
-    chkerr(cudaMalloc((void**)&(upperBound), totalComponents * sizeof(ui)));
-    chkerr(cudaMalloc((void**)&(lowerBound), totalComponents * sizeof(ui)));
-
-
-
+    
+    // Create a Reverse Map for connected components mapping
     thrust::device_ptr<unsigned int> d_vertex_map_ptr(conComp.mapping);
     thrust::device_ptr<unsigned int> d_reverse_map_ptr(conComp.reverseMap);
 
     thrust::device_vector<unsigned int> d_indices(vertexCount);
     thrust::sequence(d_indices.begin(), d_indices.end());
-    // Scatter indices into the reverse mapping array
     thrust::scatter(d_indices.begin(), d_indices.end(), d_vertex_map_ptr, d_reverse_map_ptr);
 
+    //Counter to store total cliques of each component
     ui *compCounter;
     chkerr(cudaMalloc((void**)&(compCounter), (totalComponents+1)* sizeof(ui)));
     chkerr(cudaMemset(compCounter, 0, (totalComponents+1) * sizeof(ui)));
-    getConnectedComponentStatus<<<BLK_NUMS, BLK_DIM>>>(conComp,cliqueData, densestCore, compCounter,t, tt, totalThreads);
 
+    // Get total cliques of each connected components
+    getConnectedComponentStatus<<<BLK_NUMS, BLK_DIM>>>(conComp,cliqueData, densestCore, compCounter,t, tt, totalThreads);
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Calculate total cliques for each Component");
+
+    // make it offset with cummilative sum 
     thrust::inclusive_scan(
         thrust::device_pointer_cast(compCounter),
         thrust::device_pointer_cast(compCounter + totalComponents + 1),
         thrust::device_pointer_cast(compCounter));
 
+    // Allocate memory for new clique data arranged my connected component
     memoryAllocationTrie(finalCliqueData, tt, k);
 
-
+    // counter to get loc for storing clique data
     ui *counter;
     chkerr(cudaMalloc((void**)&(counter), totalComponents* sizeof(ui)));
     chkerr(cudaMemset(counter, 0, (totalComponents) * sizeof(ui)));
 
-    chkerr(cudaFree(counter));
-
-    chkerr(cudaMalloc((void**)&(counter), vertexCount* sizeof(ui)));
-    chkerr(cudaMemset(counter, 0, (vertexCount) * sizeof(ui)));
-
+    //Rearrange the clique data based on connected components
     rearrangeCliqueData<<<BLK_NUMS, BLK_DIM>>>( conComp, cliqueData, finalCliqueData, densestCore, compCounter,counter,t, tt, k,totalThreads);
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Rearrange the clique data based on connected components");
 
+    // Free old clique data
     freTrie(cliqueData);
 
+    //Calculate the size of flow network for all components
     thrust::device_ptr<unsigned int> wrapped_counter(compCounter);
     thrust::device_ptr<unsigned int> wrapped_offset(conComp.componentOffset);
 
@@ -443,8 +444,23 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
         0u,  // Initial value
         thrust::plus<unsigned int>());
 
+    //Allocated flow network memory
     memoryAllocationFlowNetwork(flowNetwork, totalSize);
+
+    //counter for getting location of edge of vertex in flow network
+    chkerr(cudaFree(counter));
+    chkerr(cudaMalloc((void**)&(counter), vertexCount* sizeof(ui)));
+    chkerr(cudaMemset(counter, 0, (vertexCount) * sizeof(ui)));
+
+    //Create a flow network for each component
     createFlowNetwork<<<BLK_NUMS, BLK_DIM>>>( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter, counter, ui *globalCount, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui alpha) {
+    
+
+    // Upper and lower bounds of each component
+    ui *upperBound, *lowerBound;
+
+    chkerr(cudaMalloc((void**)&(upperBound), totalComponents * sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(lowerBound), totalComponents * sizeof(ui)));
     
 
 }
