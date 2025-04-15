@@ -142,6 +142,7 @@ extern  densestCorePointer  densestCore;
 extern  deviceComponentPointers conComp;
 extern devicePrunedNeighbors prunedNeighbors;
 extern deviceFlowNetworkPointers flowNetwork;
+extern  deviceCliquesPointer finalCliqueData;
 
 
 
