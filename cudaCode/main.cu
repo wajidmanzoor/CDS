@@ -10,6 +10,26 @@
 #include <thrust/unique.h>
 #include <thrust/binary_search.h>
 
+struct compute_component_value
+{
+    const unsigned int* compCounter;
+    const unsigned int* compOffset;
+    unsigned int k;
+    
+    compute_component_value(const unsigned int* _counter, 
+                          const unsigned int* _offset, 
+                          unsigned int _k)
+        : compCounter(_counter), compOffset(_offset), k(_k) {}
+    
+    __host__ __device__
+    unsigned int operator()(unsigned int i) const
+    {
+        unsigned int M = compCounter[i+1] - compCounter[i];
+        unsigned int V = compOffset[i+1] - compOffset[i];
+        return 2 * M * k + 4 * V;
+    }
+};
+
 
 
 
@@ -394,7 +414,7 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
         thrust::device_pointer_cast(compCounter + totalComponents + 1),
         thrust::device_pointer_cast(compCounter));
 
-    memoryAllocationTrie(finalCliqueData, t, k);
+    memoryAllocationTrie(finalCliqueData, tt, k);
 
 
     ui *counter;
@@ -402,29 +422,29 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
     chkerr(cudaMemset(counter, 0, (totalComponents) * sizeof(ui)));
 
     chkerr(cudaFree(counter));
-    
+
     chkerr(cudaMalloc((void**)&(counter), vertexCount* sizeof(ui)));
     chkerr(cudaMemset(counter, 0, (vertexCount) * sizeof(ui)));
-    rearrangeCliqueData( conComp, cliqueData, finalCliqueData, densestCore, compCounter,counter,t, tt, k,totalThreads);
 
-    chkerr(cuda)
+    rearrangeCliqueData<<<BLK_NUMS, BLK_DIM>>>( conComp, cliqueData, finalCliqueData, densestCore, compCounter,counter,t, tt, k,totalThreads);
 
-    createFlowNetwork( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter, counter, ui *globalCount, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui alpha) {
+    freTrie(cliqueData);
 
+    thrust::device_ptr<unsigned int> wrapped_counter(compCounter);
+    thrust::device_ptr<unsigned int> wrapped_offset(conComp.componentOffset);
 
-    
+    unsigned int totalSize = thrust::transform_reduce(
+        thrust::counting_iterator<unsigned int>(0),
+        thrust::counting_iterator<unsigned int>(totalComponents),
+        compute_component_value(
+            thrust::raw_pointer_cast(wrapped_counter),
+            thrust::raw_pointer_cast(wrapped_offset),
+            k),
+        0u,  // Initial value
+        thrust::plus<unsigned int>());
 
-
-
-
-
-
-
-
-    //Need to get a new trie for each component
-
-
-
+    memoryAllocationFlowNetwork(flowNetwork, totalSize);
+    createFlowNetwork<<<BLK_NUMS, BLK_DIM>>>( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter, counter, ui *globalCount, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui alpha) {
     
 
 }
