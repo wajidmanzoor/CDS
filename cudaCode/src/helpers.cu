@@ -798,7 +798,43 @@ __global__ void componentDecomposek(deviceComponentPointers conComp, devicePrune
     }
 }
 
-__global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, devicePrunedNeighbors prunedNeighbors, ui *counter, ui *globalCount, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui alpha) {
+
+__global__ void getConnectedComponentStatus(deviceComponentPointers conComp,deviceCliquesPointer cliqueData, densestCorePointer densestCore, ui *compCounter, ui *counter, ui t, ui tt, ui totalThreads){
+
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    for(ui i =0; i<tt;i +=totalThreads){
+        ui vertex = conComp.reverseMap[densestCore.reverseMap[cliqueData.trie[i]]];
+        ui conComp = = conComp.components[vertex];
+        cliqueData.status[i] = conComp;
+        atomicAdd(&compCounter[conComp+1],1);
+    }
+
+}
+
+__global__ void rearrangeCliqueData(deviceComponentPointers conComp,deviceCliquesPointer cliqueData, deviceCliquesPointer finalCliqueData,densestCorePointer densestCore, ui *compCounter,ui *counter,ui t, ui tt, ui k, ui totalThreads){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    for(ui i =0; i<tt;i +=totalThreads){
+        ui loc; 
+        for(ui j=0;j<k;j++){
+            ui vertex = conComp.reverseMap[densestCore.reverseMap[cliqueData.trie[j*k + i]]];
+            ui conComp = = conComp.components[vertex];
+            ui offset = compCounter[conComp];
+            if(j==0){
+                loc = atomicAdd(&counter[conComp],1);
+
+            }
+            finalCliqueData.trie[offset + j*k + loc ] = vertex;
+        }
+        
+    }
+
+
+
+
+}
+
+__global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter, ui *globalCount, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui alpha) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
@@ -809,12 +845,15 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
         ui start = conComp.componentOffset[i];
         ui end = conComp.componentOffset[i+1];
         ui total = end - start;
-        ui totalCliques = trie.totalCliques[i];
+        ui cliqueStart = compCounter[i];
+        ui cliqueEnd = compCounter[i+1];
+        ui totalCliques = cliqueEnd-cliqueStart;
+
         ui offset = i*(2*totalCliques*k+4*total);
 
         for (ui j = laneId; j < totalCliques; j += warpSize){
             for(ui x =0; x <k; x++){
-                ui vertex = cliqueData.trie[x*t+j];
+                ui vertex = cliqueData.finalCliqueData[cliqueStart + x*t+j];
                 flowNetwork.toEdge[offset + j* k +x ] = vertex;
                 flowNetwork.capacity[offset + j* k +x ] = k-1;
                 flowNetwork.flow[offset + j* k +x ] = k-1;
@@ -852,6 +891,7 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
 
 
 }
+
 
 __global__ void createPaths(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, ui totalWarps, int totalComponents, ui k, ui alpha){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
