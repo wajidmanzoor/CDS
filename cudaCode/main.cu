@@ -278,62 +278,61 @@ ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, dens
 
 }
 
-ui prune(densestCorePointer &densestCore, deviceCliquesPointer &cliqueData, ui *pruneStatus, ui *reverseMap, ui *newOffset, ui *newNeighbors, ui vertexCount, ui edgecount, ui k, ui t, ui t, ui lowerBoundDensity){
-    
-    //Prune
-    chkerr(cudaMalloc((void**)&pruneStatus, edgecount * sizeof(ui)));
+ui prune(densestCorePointer &densestCore, deviceCliquesPointer &cliqueData, devicePrunedNeighbors &prunedNeighbors,
+    ui vertexCount, ui edgecount, ui k, ui t, ui tt, ui lowerBoundDensity) {
 
-    thrust::device_ptr<ui> d_pruneStatus(pruneStatus);
-
-    // Fill the array with 1 using Thrust
+    thrust::device_ptr<ui> d_pruneStatus(prunedNeighbors.pruneStatus);
     thrust::fill(d_pruneStatus, d_pruneStatus + edgecount, 1);
 
-    pruneEdges<<<BLK_NUMS, BLK_DIM>>>( densestCore,  cliqueData,reverseMap, pruneStatus, t, tt,  k, lowerBoundDensity);
+    pruneEdges<<<BLK_NUMS, BLK_DIM>>>(densestCore, cliqueData,prunedNeighbors.pruneStatus, t, tt, k, lowerBoundDensity);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Get prune status of each edge");
 
-
-    // Get out degree after prune
-    chkerr(cudaMalloc((void**)&newOffset, (vertexCount+1) * sizeof(ui)));
-    chkerr(cudaMemset(newOffset, 0, (vertexCount+1)*sizeof(ui)));
-
-
-    generateDegreeAfterPrune<<<BLK_NUMS, BLK_DIM>>>(densestCore , pruneStatus, newOffset, vertexCount , edgecount, TOTAL_WARPS);
+    // Kernel to generate out-degrees
+    generateDegreeAfterPrune<<<BLK_NUMS, BLK_DIM>>>(
+    densestCore, prunedNeighbors.pruneStatus, prunedNeighbors.newOffset, vertexCount, edgecount, TOTAL_WARPS);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Generate Degree after pruning");
 
-    // cummulative sum offset
-    thrust::inclusive_scan(thrust::device_ptr<ui>(newOffset), thrust::device_ptr<ui>(newOffset + vertexCount + 1), thrust::device_ptr<ui>(newOffset));
+    // Inclusive scan to build offset array
+    thrust::inclusive_scan(
+    thrust::device_pointer_cast(prunedNeighbors.newOffset),
+    thrust::device_pointer_cast(prunedNeighbors.newOffset + vertexCount + 1),
+    thrust::device_pointer_cast(prunedNeighbors.newOffset));
 
+    // Get total number of remaining edges
     ui newEdgeCount;
-    chkerr(cudaMemcpy(&newEdgeCount, newOffset+ vertexCount , sizeof(ui), cudaMemcpyDeviceToHost));
-    chkerr(cudaMalloc((void**)&(newNeighbors), newEdgeCount * sizeof(ui)));
+    chkerr(cudaMemcpy(&newEdgeCount, prunedNeighbors.newOffset + vertexCount, sizeof(ui), cudaMemcpyDeviceToHost));
 
-    // Write neighbors of after output
-    size_t sharedMemoryGenNeig =  WARPS_EACH_BLK * sizeof(ui);
-    generateNeighborAfterPrune<<<BLK_NUMS, BLK_DIM,sharedMemoryGenNeig>>>(densestCore , pruneStatus, newOffset, newNeighbors, vertexCount, edgecount , TOTAL_WARPS);
+    // Allocate memory for newNeighbors
+    chkerr(cudaMalloc((void**)&(prunedNeighbors.newNeighbors), newEdgeCount * sizeof(ui)));
+
+    // Kernel to generate neighbors list
+    size_t sharedMemoryGenNeig = WARPS_EACH_BLK * sizeof(ui);
+    generateNeighborAfterPrune<<<BLK_NUMS, BLK_DIM, sharedMemoryGenNeig>>>(
+    densestCore, prunedNeighbors.pruneStatus, prunedNeighbors.newOffset, prunedNeighbors.newNeighbors, vertexCount, edgecount, TOTAL_WARPS);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Generate Neighbor after prune");
-
     return newEdgeCount;
-    
 }
-
 
 void componentDecompose(deviceComponentPointers &conComp, ui *newOffset, ui *newNeighbors, ui vertexCount, ui edgecount){
     ui *changed;
     chkerr(cudaMalloc((void**)&changed, sizeof(ui)));
     chkerr(cudaMemset(changed, 0 , sizeof(ui)));
 
-    thrust::device_vector<int> components(vertexCount);
-    thrust::sequence(components.begin(), components.end());
+    int *component;
+    cudaMalloc((void**)&component, vertexCount * sizeof(int));
+
+    thrust::device_ptr<int> components = thrust::device_pointer_cast(component);
+    thrust::sequence(components, components + vertexCount);
 
     //int iter = 0;
     //can be used to put a limit on num iters
     ui hostChanged;
     do{
     chkerr(cudaMemset(changed, 0 , sizeof(ui)));
-    componentDecompose<<<BLK_NUMS, BLK_DIM>>>(newOffset, newNeighbors,components, changed, vertexCount, edgecount, TOTAL_WARPS);
+    componentDecompose<<<BLK_NUMS, BLK_DIM>>>(newOffset, newNeighbors,component, changed, vertexCount, edgecount, TOTAL_WARPS);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Coponenet Decompose");
 
@@ -343,7 +342,6 @@ void componentDecompose(deviceComponentPointers &conComp, ui *newOffset, ui *new
 
     //Vertices in Densest Core, use mapping to get actual verticies 
     thrust::device_ptr<int> vertices(C.mapping);
-    thrust::sequence(vertices.begin(), vertices.end());
 
     thrust::sort_by_key(components.begin(), components.end(), vertices.begin());
 
@@ -355,7 +353,7 @@ void componentDecompose(deviceComponentPointers &conComp, ui *newOffset, ui *new
     int totalComponents = new_end - uniqueComponents.begin();
 
     //Create component offset 
-    thrust::device_ptr<int> componentOffsets(C.offset);
+    thrust::device_ptr<int> componentOffsets(C.componentOffset);
     thrust::lower_bound(components.begin(), components.end(),
                     uniqueComponents.begin(), uniqueComponents.begin() + totalComponents,
                     componentOffsets.begin());
