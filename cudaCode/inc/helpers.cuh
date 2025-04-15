@@ -33,3 +33,9 @@ __global__ void generateNeighborAfterPrune(densestCorePointer densestCore ,ui *p
 
 //Component Decompose
 __global__ void componentDecomposek(deviceComponentPointers conComp, devicePrunedNeighbors prunedNeighbors,ui *changed, ui n, ui m, ui totalWarps);
+
+//dynamic exact
+__global__ void getConnectedComponentStatus(deviceComponentPointers conComp,deviceCliquesPointer cliqueData, densestCorePointer densestCore, ui *compCounter, ui *counter, ui t, ui tt, ui totalThreads);
+__global__ void rearrangeCliqueData(deviceComponentPointers conComp,deviceCliquesPointer cliqueData, deviceCliquesPointer finalCliqueData,densestCorePointer densestCore, ui *compCounter,ui *counter,ui t, ui tt, ui k, ui totalThreads);
+__global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter, ui *globalCount, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui alpha);
+
