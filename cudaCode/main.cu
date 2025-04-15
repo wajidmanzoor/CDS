@@ -251,11 +251,15 @@ ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, dens
 
     generateDensestCore<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,densestCore,globalCount,graph.n,lowerBoundDensity,TOTAL_WARPS);
     cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Densest Core Kernel");
+
 
     thrust::inclusive_scan(thrust::device_ptr<ui>(densestCore.offset), thrust::device_ptr<ui>(densestCore.offset + coreSize + 1), thrust::device_ptr<ui>(densestCore.offset));
 
     ui edgeCountCore;
     chkerr(cudaMemcpy(&edgeCountCore, densestCore.offset+coreSize , sizeof(ui), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(densestCore.m,&edgeCountCore, sizeof(ui), cudaMemcpyHostToDevice));
+    
     chkerr(cudaMalloc((void**)&(densestCore.neighbors), edgeCountCore * sizeof(ui)));
 
     thrust::device_ptr<unsigned int> d_vertex_map_ptr(densestCore.mapping);
@@ -271,8 +275,10 @@ ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, dens
     thrust::scatter(d_indices.begin(), d_indices.end(), d_vertex_map_ptr, d_reverse_map_ptr);
 
     size_t sharedMemoryGenNeighCore =  WARPS_EACH_BLK * sizeof(ui);
-    generateNeighborDensestCore<<<BLK_NUMS, BLK_DIM,sharedMemoryGenNeighCore>>>(deviceGraph,densestCore,reverseMap,lowerBoundDensity,TOTAL_WARPS);
+    generateNeighborDensestCore<<<BLK_NUMS, BLK_DIM,sharedMemoryGenNeighCore>>>(deviceGraph,densestCore,lowerBoundDensity,TOTAL_WARPS);
     cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Densest Core Neighbor Kernel");
+
 
     return edgeCountCore;
 
