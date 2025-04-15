@@ -241,46 +241,40 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
 }
 
 
-ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, densestCorePointer &densestCore, ui *reverseMap, ui coreSize, ui coreTotalCliques, ui lowerBoundDensity){
+ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, densestCorePointer &densestCore, ui coreSize, ui coreTotalCliques, ui lowerBoundDensity){
     memoryAllocationDensestCore(densestCore, coreSize, lowerBoundDensity , coreTotalCliques);
+
     ui *globalCount;
 
     chkerr(cudaMalloc((void**)&globalCount, sizeof(ui)));
     chkerr(cudaMemset(globalCount, 0, sizeof(ui)));
 
-
     generateDensestCore<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,densestCore,globalCount,graph.n,lowerBoundDensity,TOTAL_WARPS);
     cudaDeviceSynchronize();
-    CUDA_CHECK_ERROR("Densest Core Kernel");
 
 
     thrust::inclusive_scan(thrust::device_ptr<ui>(densestCore.offset), thrust::device_ptr<ui>(densestCore.offset + coreSize + 1), thrust::device_ptr<ui>(densestCore.offset));
 
     ui edgeCountCore;
     chkerr(cudaMemcpy(&edgeCountCore, densestCore.offset+coreSize , sizeof(ui), cudaMemcpyDeviceToHost));
+
     chkerr(cudaMemcpy(densestCore.m,&edgeCountCore, sizeof(ui), cudaMemcpyHostToDevice));
-    
     chkerr(cudaMalloc((void**)&(densestCore.neighbors), edgeCountCore * sizeof(ui)));
 
     thrust::device_ptr<unsigned int> d_vertex_map_ptr(densestCore.mapping);
-
-    thrust::device_ptr<unsigned int> d_reverse_map_ptr(reverseMap);
+    thrust::device_ptr<unsigned int> d_reverse_map_ptr(densestCore.reverseMap);
 
     thrust::device_vector<unsigned int> d_indices(coreSize);
-
     thrust::sequence(d_indices.begin(), d_indices.end());
-
     // Scatter indices into the reverse mapping array
-
     thrust::scatter(d_indices.begin(), d_indices.end(), d_vertex_map_ptr, d_reverse_map_ptr);
 
     size_t sharedMemoryGenNeighCore =  WARPS_EACH_BLK * sizeof(ui);
     generateNeighborDensestCore<<<BLK_NUMS, BLK_DIM,sharedMemoryGenNeighCore>>>(deviceGraph,densestCore,lowerBoundDensity,TOTAL_WARPS);
     cudaDeviceSynchronize();
-    CUDA_CHECK_ERROR("Densest Core Neighbor Kernel");
-
 
     return edgeCountCore;
+
 
 }
 
@@ -374,15 +368,62 @@ int componentDecompose(deviceComponentPointers &conComp,devicePrunedNeighbors &p
 
 }
 
-void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &prunedNeighbors, ui vertexCount, ui edgecount, int totalComponents){
+void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &prunedNeighbors,deviceCliquesPointer &cliqueData, deviceCliquesPointer &finalCliqueData, vertexCount, ui edgecount, int totalComponents){
     ui *upperBound, *lowerBound;
 
     chkerr(cudaMalloc((void**)&(upperBound), totalComponents * sizeof(ui)));
-    chkerr(cudaMalloc((void**)&(lowerBoundd1), totalComponents * sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(lowerBound), totalComponents * sizeof(ui)));
+
+
+
+    thrust::device_ptr<unsigned int> d_vertex_map_ptr(conComp.mapping);
+    thrust::device_ptr<unsigned int> d_reverse_map_ptr(conComp.reverseMap);
+
+    thrust::device_vector<unsigned int> d_indices(vertexCount);
+    thrust::sequence(d_indices.begin(), d_indices.end());
+    // Scatter indices into the reverse mapping array
+    thrust::scatter(d_indices.begin(), d_indices.end(), d_vertex_map_ptr, d_reverse_map_ptr);
+
+    ui *compCounter;
+    chkerr(cudaMalloc((void**)&(compCounter), (totalComponents+1)* sizeof(ui)));
+    chkerr(cudaMemset(compCounter, 0, (totalComponents+1) * sizeof(ui)));
+    getConnectedComponentStatus<<<BLK_NUMS, BLK_DIM>>>(conComp,cliqueData, densestCore, compCounter,t, tt, totalThreads);
+
+    thrust::inclusive_scan(
+        thrust::device_pointer_cast(compCounter),
+        thrust::device_pointer_cast(compCounter + totalComponents + 1),
+        thrust::device_pointer_cast(compCounter));
+
+    memoryAllocationTrie(finalCliqueData, t, k);
+
+
+    ui *counter;
+    chkerr(cudaMalloc((void**)&(counter), totalComponents* sizeof(ui)));
+    chkerr(cudaMemset(counter, 0, (totalComponents) * sizeof(ui)));
+
+    chkerr(cudaFree(counter));
+    
+    chkerr(cudaMalloc((void**)&(counter), vertexCount* sizeof(ui)));
+    chkerr(cudaMemset(counter, 0, (vertexCount) * sizeof(ui)));
+    rearrangeCliqueData( conComp, cliqueData, finalCliqueData, densestCore, compCounter,counter,t, tt, k,totalThreads);
+
+    chkerr(cuda)
+
+    createFlowNetwork( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter, counter, ui *globalCount, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui alpha) {
+
+
+    
+
+
+
+
+
+
+
 
     //Need to get a new trie for each component
 
-    
+
 
     
 
@@ -469,6 +510,7 @@ int main(int argc, const char * argv[]) {
 
     //LOCATE CORE
     ui lowerBoundDensity = static_cast<ui>(std::ceil(maxDensity));
+
     ui edgecount = generateDensestCore(graph,deviceGraph,  densestCore, coreSize, coreTotalCliques,lowerBoundDensity);
     //TODO: LISTING AGAIN not need added level as status of each clique to track the cores
 
