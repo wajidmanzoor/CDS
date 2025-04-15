@@ -65,18 +65,9 @@ typedef struct  {
 }deviceMotifPointers;
 
 typedef struct  {
-
     ui *componentOffset;
+    ui *components;
     ui *mapping;
-    ui *offset;
-    ui *neighbors;
-    
-    ui *cliqueDegree;
-    int *cliqueCore;
-    
-    double *density;
-    ui *motifCount;
-    ui *cliqueCorePeelSequence;
 }deviceComponentPointers;
 
 typedef struct  {
@@ -117,10 +108,10 @@ typedef struct {
 
 typedef struct{
     ui *mapping;
+    ui *reverseMap;
     ui *offset;
     ui *neighbors;
     ui *cliqueDegree;
-    //ui *cliqueCore;
     double *density;
     ui *n;
     ui *m;
@@ -129,11 +120,20 @@ typedef struct{
 
 }densestCorePointer;
 
+typedef struct{
+  ui *newOffset;
+  ui *newNeighbors;
+  ui *pruneStatus;
+
+}devicePrunedNeighbors;
+
 extern  deviceGraphPointers deviceGraph;
 extern  deviceDAGpointer deviceDAG;
 extern  cliqueLevelDataPointer levelData;
 extern  deviceCliquesPointer cliqueData;
 extern  densestCorePointer  densestCore;
+extern  deviceComponentPointers conComp;
+extern devicePrunedNeighbors prunedNeighbors;
 
 
 

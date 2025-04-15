@@ -6,3 +6,5 @@ deviceDAGpointer deviceDAG;
 cliqueLevelDataPointer levelData;
 deviceCliquesPointer cliqueData;
 densestCorePointer  densestCore;
+deviceComponentPointers conComp;
+devicePrunedNeighbors prunedNeighbors;
