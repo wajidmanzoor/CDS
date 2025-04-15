@@ -14,6 +14,8 @@ void memoryAllocationTrie(deviceCliquesPointer &C, ui t, ui k);
 ui memoryAllocationlevelData(cliqueLevelDataPointer &L, ui k, ui pSize, ui cpSize, ui maxDegree, ui totalWarps);
 void memoryAllocationDensestCore(densestCorePointer &C, ui n, ui density, ui totalCliques);
 
+void memoryAllocationPrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors, ui n, ui m);
+
 // Function declarations for memory deallocation
 void freeGraph(deviceGraphPointers &G);
 //void freeMotif(deviceMotifPointers &M);
@@ -24,3 +26,4 @@ void freeDAG(deviceDAGpointer &D);
 void freeLevelPartitionData(cliqueLevelDataPointer &L);
 void freeLevelData(cliqueLevelDataPointer &L);
 void freeDensestCore(densestCorePointer &C);
+void freePrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors);
