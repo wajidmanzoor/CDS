@@ -374,7 +374,19 @@ int componentDecompose(deviceComponentPointers &conComp,devicePrunedNeighbors &p
 
 }
 
+void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &prunedNeighbors, ui vertexCount, ui edgecount, int totalComponents){
+    ui *upperBound, *lowerBound;
 
+    chkerr(cudaMalloc((void**)&(upperBound), totalComponents * sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(lowerBoundd1), totalComponents * sizeof(ui)));
+
+    //Need to get a new trie for each component
+
+    
+
+    
+
+}
 
 int main(int argc, const char * argv[]) {
     if (argc != 7) {

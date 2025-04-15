@@ -59,6 +59,7 @@ public class FindMinCut {
 
 		double temp[];
 		
+		//Cannot be parallel 
 		//wm: break then no augmented path is found
 		while(result!=-1) {
 
@@ -124,6 +125,8 @@ public class FindMinCut {
 		parent[s]=s;
 		double temp[];
 		
+
+		// Cannot be parallel 
 		while(!queue.isEmpty()) {
 			int p=queue.poll();
 

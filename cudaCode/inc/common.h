@@ -127,6 +127,13 @@ typedef struct{
 
 }devicePrunedNeighbors;
 
+typedef struct{
+    ui *toEdge;
+    double *capacity;
+    double *flow;
+
+}deviceFlowNetworkPointers;
+
 extern  deviceGraphPointers deviceGraph;
 extern  deviceDAGpointer deviceDAG;
 extern  cliqueLevelDataPointer levelData;
@@ -134,6 +141,7 @@ extern  deviceCliquesPointer cliqueData;
 extern  densestCorePointer  densestCore;
 extern  deviceComponentPointers conComp;
 extern devicePrunedNeighbors prunedNeighbors;
+extern deviceFlowNetworkPointers flowNetwork;
 
 
 
