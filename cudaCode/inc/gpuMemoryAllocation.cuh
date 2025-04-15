@@ -15,6 +15,7 @@ ui memoryAllocationlevelData(cliqueLevelDataPointer &L, ui k, ui pSize, ui cpSiz
 void memoryAllocationDensestCore(densestCorePointer &C, ui n, ui density, ui totalCliques);
 
 void memoryAllocationPrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors, ui n, ui m);
+void memoryAllocationFlowNetwork(deviceFlowNetworkPointers &flowNetwork, ui size);
 
 // Function declarations for memory deallocation
 void freeGraph(deviceGraphPointers &G);
@@ -27,3 +28,4 @@ void freeLevelPartitionData(cliqueLevelDataPointer &L);
 void freeLevelData(cliqueLevelDataPointer &L);
 void freeDensestCore(densestCorePointer &C);
 void freePrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors);
+void freeFlowNetwork(deviceFlowNetworkPointers &flowNetwork);
