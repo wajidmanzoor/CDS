@@ -798,7 +798,6 @@ __global__ void componentDecomposek(deviceComponentPointers conComp, devicePrune
     }
 }
 
-
 __global__ void getConnectedComponentStatus(deviceComponentPointers conComp,deviceCliquesPointer cliqueData, densestCorePointer densestCore, ui *compCounter, ui *counter, ui t, ui tt, ui totalThreads){
 
     int idx = blockIdx.x * blockDim.x + threadIdx.x;

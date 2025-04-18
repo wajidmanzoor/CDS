@@ -10,29 +10,6 @@
 #include <thrust/unique.h>
 #include <thrust/binary_search.h>
 
-struct compute_component_value
-{
-    const unsigned int* compCounter;
-    const unsigned int* compOffset;
-    unsigned int k;
-    
-    compute_component_value(const unsigned int* _counter, 
-                          const unsigned int* _offset, 
-                          unsigned int _k)
-        : compCounter(_counter), compOffset(_offset), k(_k) {}
-    
-    __host__ __device__
-    unsigned int operator()(unsigned int i) const
-    {
-        unsigned int M = compCounter[i+1] - compCounter[i];
-        unsigned int V = compOffset[i+1] - compOffset[i];
-        return 2 * M * k + 4 * V;
-    }
-};
-
-
-
-
 void generateDAG(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGpointer& deviceDAG , vector<ui> listingOrder){
     
     memoryAllocationDAG(deviceDAG, graph.n, graph.m);
@@ -417,50 +394,96 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
     // Allocate memory for new clique data arranged my connected component
     memoryAllocationTrie(finalCliqueData, tt, k);
 
-    // counter to get loc for storing clique data
-    ui *counter;
-    chkerr(cudaMalloc((void**)&(counter), totalComponents* sizeof(ui)));
-    chkerr(cudaMemset(counter, 0, (totalComponents) * sizeof(ui)));
+    // Memory allocation for bounds
+    double* bounds;
+    chkerr(cudaMalloc((void**)&bounds, 2 * totalComponents * sizeof(double)));
+    double* upperBound = bounds;
+    double* lowerBound = bounds + totalComponents;
 
-    //Rearrange the clique data based on connected components
-    rearrangeCliqueData<<<BLK_NUMS, BLK_DIM>>>( conComp, cliqueData, finalCliqueData, densestCore, compCounter,counter,t, tt, k,totalThreads);
-    cudaDeviceSynchronize();
-    CUDA_CHECK_ERROR("Rearrange the clique data based on connected components");
+    // Reusable device pointers
+    thrust::device_ptr<unsigned int> d_counter(compCounter);
+    thrust::device_ptr<unsigned int> d_offset(conComp.componentOffset);
+    thrust::device_ptr<double> d_lowerBound(lowerBound);
+    thrust::device_ptr<double> d_upperBound(upperBound);
 
-    // Free old clique data
-    freTrie(cliqueData);
+    // Lower bound calculation
+    auto lower_bound_calc = [=] __host__ __device__ (unsigned int i) {
+        unsigned int d_diff = d_counter[i+1] - d_counter[i];
+        unsigned int s_diff = d_offset[i+1] - d_offset[i];
+        return static_cast<double>(d_diff) / s_diff;
+    };
 
-    //Calculate the size of flow network for all components
-    thrust::device_ptr<unsigned int> wrapped_counter(compCounter);
-    thrust::device_ptr<unsigned int> wrapped_offset(conComp.componentOffset);
+    thrust::transform(
+        thrust::counting_iterator<unsigned int>(0),
+        thrust::counting_iterator<unsigned int>(totalComponents),
+        d_lowerBound,
+        lower_bound_calc
+    );
+    double lb = *(thrust::max_element(d_lowerBound, d_lowerBound + totalComponents));
 
+    // Upper bound calculation
+    const double k_fact = tgamma(k + 1);
+    const double denominator = pow(k_fact, 1.0 / k);
+    const double densest_density = *densestcore.density;
+
+    auto upper_bound_calc = [=] __host__ __device__ (unsigned int i) {
+        unsigned int d = d_counter[i+1] - d_counter[i];
+        unsigned int s = d_offset[i+1] - d_offset[i];
+        double numerator = pow(static_cast<double>(d), (k - 1.0) / k);
+        double value = numerator / denominator;
+        return min(value, densest_density);
+    };
+
+    thrust::transform(
+        thrust::counting_iterator<unsigned int>(0),
+        thrust::counting_iterator<unsigned int>(totalComponents),
+        d_upperBound,
+        upper_bound_calc
+    );
+
+    // Size calculation for flow network
     unsigned int totalSize = thrust::transform_reduce(
         thrust::counting_iterator<unsigned int>(0),
         thrust::counting_iterator<unsigned int>(totalComponents),
-        compute_component_value(
-            thrust::raw_pointer_cast(wrapped_counter),
-            thrust::raw_pointer_cast(wrapped_offset),
-            k),
-        0u,  // Initial value
-        thrust::plus<unsigned int>());
+        [=] __host__ __device__ (unsigned int i) {
+            if (d_upperBound[i] > lb) {
+                unsigned int M = d_counter[i+1] - d_counter[i];
+                unsigned int V = d_offset[i+1] - d_offset[i];
+                return 2 * M * k + 4 * V;  
+            }
+            return 0u;
+        },
+        0u,
+        thrust::plus<unsigned int>()
+    );
 
-    //Allocated flow network memory
-    memoryAllocationFlowNetwork(flowNetwork, totalSize);
+    thrust::device_vector<int> marks(totalComponents);
+    thrust::transform(
+        d_upperBound, d_upperBound + totalComponents,
+        marks.begin(),
+        [lb] __host__ __device__ (double val) {
+            return val > lb ? 1 : 0;
+        }
+    );
 
-    //counter for getting location of edge of vertex in flow network
-    chkerr(cudaFree(counter));
-    chkerr(cudaMalloc((void**)&(counter), vertexCount* sizeof(ui)));
-    chkerr(cudaMemset(counter, 0, (vertexCount) * sizeof(ui)));
-
+    // Compute ranks for valid components
+    thrust::device_vector<int> ranks(totalComponents);
+    thrust::exclusive_scan(marks.begin(), marks.end(), ranks.begin());
+    thrust::transform(
+        marks.begin(), marks.end(),
+        ranks.begin(),
+        ranks.begin(),
+        [] __host__ __device__ (int mark, int rank) {
+            return mark ? rank : -1;
+        }
+    );
+    memoryAllocationComponent(conComp, vertexCount , newEdgeCount);
     //Create a flow network for each component
-    createFlowNetwork<<<BLK_NUMS, BLK_DIM>>>( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter, counter, ui *globalCount, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui alpha) {
+    createFlowNetwork<<<BLK_NUMS, BLK_DIM>>>( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter, counter, ui *globalCount, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui alpha);
+
     
 
-    // Upper and lower bounds of each component
-    ui *upperBound, *lowerBound;
 
-    chkerr(cudaMalloc((void**)&(upperBound), totalComponents * sizeof(ui)));
-    chkerr(cudaMalloc((void**)&(lowerBound), totalComponents * sizeof(ui)));
     
 
 }
@@ -548,16 +571,16 @@ int main(int argc, const char * argv[]) {
     ui lowerBoundDensity = static_cast<ui>(std::ceil(maxDensity));
 
     ui edgecount = generateDensestCore(graph,deviceGraph,  densestCore, coreSize, coreTotalCliques,lowerBoundDensity);
-    //TODO: LISTING AGAIN not need added level as status of each clique to track the cores
+    //LISTING AGAIN not need added level as status of each clique to track the cores
 
 
-    //TODO: EDGE PRUNING
+    //EDGE PRUNING
     ui vertexCount;
     chkerr(cudaMemcpy(&vertexCount, densestCore.n, sizeof(ui), cudaMemcpyDeviceToHost));
 
     ui newEdgeCount = prune(densestCore, cliqueData, prunedNeighbors, vertexCount, edgecount, k, t, tt, lowerBoundDensity);
     
-    //TODO: COMPONENT DECOMPOSE
+    //COMPONENT DECOMPOSE
     memoryAllocationComponent(conComp, vertexCount , newEdgeCount);
     int totalComponents = componentDecompose(conComp, prunedNeighbors, vertexCount, newEdgeCount);
 
