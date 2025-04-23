@@ -830,59 +830,62 @@ __global__ void rearrangeCliqueData(deviceComponentPointers conComp,deviceClique
 
 }
 
-__global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter, ui *globalCount, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui alpha) {
+__global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter,ui *upperBound, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui lb) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
 
     for(ui i = warpId; i < totalComponents; i += totalWarps){
 
-        ui offsetLoc;
-        ui start = conComp.componentOffset[i];
-        ui end = conComp.componentOffset[i+1];
-        ui total = end - start;
-        ui cliqueStart = compCounter[i];
-        ui cliqueEnd = compCounter[i+1];
-        ui totalCliques = cliqueEnd-cliqueStart;
+        if(upperBound[warpId]>lb){
+            ui alpha = (upperBound[warpId]+lb)/2;
+            ui offsetLoc;
+            ui start = conComp.componentOffset[i];
+            ui end = conComp.componentOffset[i+1];
+            ui total = end - start;
+            ui cliqueStart = compCounter[i];
+            ui cliqueEnd = compCounter[i+1];
+            ui totalCliques = cliqueEnd-cliqueStart;
 
-        ui offset = i*(2*totalCliques*k+4*total);
+            ui offset = i*(2*totalCliques*k+4*total);
 
-        for (ui j = laneId; j < totalCliques; j += warpSize){
-            for(ui x =0; x <k; x++){
-                ui vertex = cliqueData.finalCliqueData[cliqueStart + x*t+j];
-                flowNetwork.toEdge[offset + j* k +x ] = vertex;
-                flowNetwork.capacity[offset + j* k +x ] = k-1;
-                flowNetwork.flow[offset + j* k +x ] = k-1;
+            for (ui j = laneId; j < totalCliques; j += warpSize){
+                for(ui x =0; x <k; x++){
+                    ui vertex = cliqueData.finalCliqueData[cliqueStart + x*t+j];
+                    flowNetwork.toEdge[offset + j* k +x ] = vertex;
+                    flowNetwork.capacity[offset + j* k +x ] = k-1;
+                    flowNetwork.flow[offset + j* k +x ] = k-1;
+
+                    ui loc = atomicAdd(&counter[vertex],1);
+                    flowNetwork.toEdge[offset + totalCliques + vertex + loc] = j;
+                    flowNetwork.capacity[offset + totalCliques + vertex + loc] = 1;
+                    flowNetwork.flow[offset + totalCliques + vertex + loc ] = 1;
+                }
+            }
+
+            for (ui j = laneId; j < total; j += warpSize){
+                ui vertex = conComp.mapping[offset+j];
+                flowNetwork.toEdge[offset + totalCliques + total + 1] = vertex;
+                flowNetwork.capacity[offset + totalCliques + total + 1] = densestCore.cliqueDegree[vertex];
+                flowNetwork.flow[offset + totalCliques + total + 1] = densestCore.cliqueDegree[vertex];
 
                 ui loc = atomicAdd(&counter[vertex],1);
-                flowNetwork.toEdge[offset + totalCliques + vertex + loc] = j;
-                flowNetwork.capacity[offset + totalCliques + vertex + loc] = 1;
-                flowNetwork.flow[offset + totalCliques + vertex + loc ] = 1;
+                flowNetwork.toEdge[offset + totalCliques + vertex + loc] = total+totalCliques;
+                flowNetwork.capacity[offset + totalCliques + vertex + loc] = 0;
+                flowNetwork.flow[offset + totalCliques + vertex + loc ] = 0;
+
+                flowNetwork.toEdge[offset + totalCliques + total + 2] = vertex;
+                flowNetwork.capacity[offset + totalCliques + total + 1] = 0;
+                flowNetwork.flow[offset + totalCliques + total + 1] = 0;
+
+                loc = atomicAdd(&counter[vertex],1);
+                flowNetwork.toEdge[offset + totalCliques + vertex + loc] = total+totalCliques+1;
+                flowNetwork.capacity[offset + totalCliques + vertex + loc] = alpha*k;
+                flowNetwork.flow[offset + totalCliques + vertex + loc ] = alpha*k;
+
             }
-        }
-
-        for (ui j = laneId; j < total; j += warpSize){
-            ui vertex = conComp.mapping[offset+j];
-            flowNetwork.toEdge[offset + totalCliques + total + 1] = vertex;
-            flowNetwork.capacity[offset + totalCliques + total + 1] = densestCore.cliqueDegree[vertex];
-            flowNetwork.flow[offset + totalCliques + total + 1] = densestCore.cliqueDegree[vertex];
-
-            ui loc = atomicAdd(&counter[vertex],1);
-            flowNetwork.toEdge[offset + totalCliques + vertex + loc] = total+totalCliques;
-            flowNetwork.capacity[offset + totalCliques + vertex + loc] = 0;
-            flowNetwork.flow[offset + totalCliques + vertex + loc ] = 0;
-
-            flowNetwork.toEdge[offset + totalCliques + total + 2] = vertex;
-            flowNetwork.capacity[offset + totalCliques + total + 1] = 0;
-            flowNetwork.flow[offset + totalCliques + total + 1] = 0;
-
-            loc = atomicAdd(&counter[vertex],1);
-            flowNetwork.toEdge[offset + totalCliques + vertex + loc] = total+totalCliques+1;
-            flowNetwork.capacity[offset + totalCliques + vertex + loc] = alpha*k;
-            flowNetwork.flow[offset + totalCliques + vertex + loc ] = alpha*k;
 
         }
-
     }
 
 
