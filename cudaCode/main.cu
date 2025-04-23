@@ -479,12 +479,8 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
     );
     memoryAllocationComponent(conComp, vertexCount , newEdgeCount);
     //Create a flow network for each component
-    createFlowNetwork<<<BLK_NUMS, BLK_DIM>>>( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter, counter, ui *globalCount, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui alpha);
-
-    
-
-
-    
+    createFlowNetwork<<<BLK_NUMS, BLK_DIM>>>(flowNetwork, conComp, densestCore, finalCliqueData, compCounter, counter,upperBound, vertexCount,newEdgeCount, TOTAL_WARPS, totalComponents, k, lb);
+ 
 
 }
 
