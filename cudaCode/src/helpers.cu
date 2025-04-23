@@ -892,6 +892,27 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
 }
 
 
+__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter,ui *upperBound, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui lb) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int warpId = idx / warpSize;
+    int laneId = idx % warpSize;
+
+    for(ui i = warpId; i < totalComponents; i += totalWarps){
+
+        if(upperBound[warpId]>lb){
+            
+        }
+    }
+
+
+
+}
+
+
+
+
+
+
 /*__global__ void createPaths(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, ui totalWarps, int totalComponents, ui k, ui alpha){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;

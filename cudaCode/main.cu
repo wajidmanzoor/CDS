@@ -394,6 +394,8 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
     // Allocate memory for new clique data arranged my connected component
     memoryAllocationTrie(finalCliqueData, tt, k);
 
+    //TODO: MIGHT BE BETTER IF I JUST USE ON KERNEL TO DO THIS ALL THRUST STUFF
+
     // Memory allocation for bounds
     double* bounds;
     chkerr(cudaMalloc((void**)&bounds, 2 * totalComponents * sizeof(double)));
@@ -457,26 +459,31 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
         thrust::plus<unsigned int>()
     );
 
-    thrust::device_vector<int> marks(totalComponents);
+
+    // Store the loaction of flow network for each graph
+    int* ranks;
+    cudaMalloc((void**)&ranks, totalComponents * sizeof(int));
+    thrust::device_ptr<int> d_ranks(ranks);
     thrust::transform(
-        d_upperBound, d_upperBound + totalComponents,
-        marks.begin(),
+        thrust::device_ptr<const double>(d_upperBound),
+        thrust::device_ptr<const double>(d_upperBound + totalComponents),
+        d_ranks,
         [lb] __host__ __device__ (double val) {
-            return val > lb ? 1 : 0;
+            return (val > lb) ? 1 : 0;
+        }
+    );
+    thrust::exclusive_scan(d_ranks, d_ranks + totalComponents, d_ranks);
+    thrust::transform(
+        thrust::device_ptr<const double>(d_upperBound),  // Original values
+        thrust::device_ptr<const double>(d_upperBound + totalComponents),
+        d_ranks,                                        // Current ranks
+        d_ranks,                                        // Output
+        [lb] __host__ __device__ (double val, int rank) {
+            return (val > lb) ? rank : -1;
         }
     );
 
-    // Compute ranks for valid components
-    thrust::device_vector<int> ranks(totalComponents);
-    thrust::exclusive_scan(marks.begin(), marks.end(), ranks.begin());
-    thrust::transform(
-        marks.begin(), marks.end(),
-        ranks.begin(),
-        ranks.begin(),
-        [] __host__ __device__ (int mark, int rank) {
-            return mark ? rank : -1;
-        }
-    );
+
     memoryAllocationComponent(conComp, vertexCount , newEdgeCount);
     //Create a flow network for each component
     createFlowNetwork<<<BLK_NUMS, BLK_DIM>>>(flowNetwork, conComp, densestCore, finalCliqueData, compCounter, counter,upperBound, vertexCount,newEdgeCount, TOTAL_WARPS, totalComponents, k, lb);
