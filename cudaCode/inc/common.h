@@ -128,7 +128,9 @@ typedef struct{
 }devicePrunedNeighbors;
 
 typedef struct{
-    ui *toEdge;
+    ui *ccOffset; //Gives offset for where the neighbor offset starts for each connected component;
+    ui *offset; // Gives neighbor offset of each connected componenet.
+    ui *toEdge; // neighbors
     double *capacity;
     double *flow;
     ui *height;

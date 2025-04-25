@@ -156,12 +156,17 @@ void memoryAllocationPrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors, ui
     cudaDeviceSynchronize();
 }
 
-void memoryAllocationFlowNetwork(deviceFlowNetworkPointers &flowNetwork, ui size){
-    chkerr(cudaMalloc((void**)&(flowNetwork.toEdge), size * sizeof(ui)));
 
-    chkerr(cudaMalloc((void**)&(flowNetwork.capacity), size * sizeof(capacity)));
-    chkerr(cudaMalloc((void**)&(flowNetwork.flow), size* sizeof(capacity)));
 
+void memoryAllocationFlowNetwork(deviceFlowNetworkPointers &flowNetwork, ui vertexSize, ui neighborSize, ui totalComponents){
+
+    chkerr(cudaMalloc((void**)&(flowNetwork.offset), (vertexSize + totalComponents) * sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(flowNetwork.toEdge), neighborSize * sizeof(ui)));
+
+    chkerr(cudaMalloc((void**)&(flowNetwork.capacity), neighborSize * sizeof(capacity)));
+    chkerr(cudaMalloc((void**)&(flowNetwork.flow), neighborSize* sizeof(capacity)));
+    chkerr(cudaMalloc((void**)&(flowNetwork.height), vertexSize* sizeof(capacity)));
+    chkerr(cudaMalloc((void**)&(flowNetwork.excess), vertexSize* sizeof(capacity)));
     cudaDeviceSynchronize();
 
 }
