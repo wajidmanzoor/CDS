@@ -5,6 +5,21 @@
 //TODO: Make code a bit more structured and clean
 //TODO: Try to find more ways to optimize
 
+__device__ double fact(ui k){
+    double res = 1;
+    int i = k;
+    while(i>1){
+        res= res*i;
+        i--;
+
+    }
+    return res;
+}
+
+__device__ double power(ui totalCliques, double p) {
+    return powf((double)totalCliques, p );
+}
+
 __global__ void generateDegreeDAG(deviceGraphPointers G, deviceDAGpointer D, ui *listingOrder, ui n, ui m, ui totalWarps) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
@@ -1115,6 +1130,38 @@ __global__ void edmondsKarp(deviceFlowNetworkPointers flowNetwork, deviceCompone
 }
 
 
+
+__global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter, ui *lowerBound, ui *upperBound, ui *ccOffset,  ui *neighborSize, ui totalComponenets, ui k, ui maxDensity){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx==0){
+        ccOffset[idx]=0;
+    }
+
+    for(ui i = idx; i<totalComponenets; i+=TOTAL_THREAD ){
+        ui totalCliques = compCounter[i+1] - compCounter[i];
+        ui totalSize = conComp.componentOffset[i+1] -  conComp.componentOffset[i];
+        double lb = (double) (totalCliques)/totalSize;
+        atomicMax(lowerBound, lb);
+
+        double den = power(fact(k),1.0/k);
+        double num = power(totalCliques, (k-1.0)/k);
+        double up = max(maxDensity, num/dem);
+
+        upperBound[i] = up;
+
+        if(up>lb){
+            ccOffset[i+1] = totalCliques + totalSize + 2;
+            atomicAdd(neighborSize, 2*totalCliques*k + 4*totalSize);
+
+
+        }
+        else{
+            ccOffset[i+1] = 0;
+        }
+    }
+
+
+}
 
 /*__global__ void createPaths(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, ui totalWarps, int totalComponents, ui k, ui alpha){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
