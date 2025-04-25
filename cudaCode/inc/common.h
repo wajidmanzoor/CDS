@@ -131,6 +131,8 @@ typedef struct{
     ui *toEdge;
     double *capacity;
     double *flow;
+    ui *height;
+    double *excess;
 
 }deviceFlowNetworkPointers;
 
