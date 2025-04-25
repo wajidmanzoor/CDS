@@ -830,15 +830,15 @@ __global__ void rearrangeCliqueData(deviceComponentPointers conComp,deviceClique
 
 }
 
-__global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter,ui *upperBound, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui lb) {
+__global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter,ui *upperBound, ui *offset,ui *rank, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui lb) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
 
     for(ui i = warpId; i < totalComponents; i += totalWarps){
 
-        if(upperBound[warpId]>lb){
-            ui alpha = (upperBound[warpId]+lb)/2;
+        if(upperBound[i]>lb){
+            ui alpha = (upperBound[i]+lb)/2;
             ui offsetLoc;
             ui start = conComp.componentOffset[i];
             ui end = conComp.componentOffset[i+1];
@@ -847,7 +847,7 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
             ui cliqueEnd = compCounter[i+1];
             ui totalCliques = cliqueEnd-cliqueStart;
 
-            ui offset = i*(2*totalCliques*k+4*total);
+            ui offset = offset[rank[i]];
 
             for (ui j = laneId; j < totalCliques; j += warpSize){
                 for(ui x =0; x <k; x++){
@@ -885,6 +885,21 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
 
             }
 
+            for(ui j = laneId; j < totalCliques + total + 2; j += warpSize){
+                if(j ==0){
+                    flowNetwork.offset[need + j ] =0;
+                } else if(j<totalCliques+1){
+                    flowNetwork.offset[need + j ]  = j*k; 
+
+                } else if(j<totalCliques+total+1){
+                    flowNetwork.offset[need + j ] = totalCliques*k+
+
+                }
+
+                //Need to implement a way to get the offset
+
+
+            }
         }
     }
 
@@ -892,7 +907,7 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
 }
 
 
-__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter,ui *upperBound, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui lb) {
+__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter,ui *upperBound, ui *ranks,ui *offset,ui n, ui m, ui totalWarps, int totalComponents, ui k, ui lb) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
@@ -900,7 +915,114 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceCompone
     for(ui i = warpId; i < totalComponents; i += totalWarps){
 
         if(upperBound[warpId]>lb){
+            ui alpha = (upperBound[warpId]+lb)/2;
+            ui offsetLoc;
+            ui start = conComp.componentOffset[i];
+            ui end = conComp.componentOffset[i+1];
+            ui total = end - start;
+            ui cliqueStart = compCounter[i];
+            ui cliqueEnd = compCounter[i+1];
+            ui totalCliques = cliqueEnd-cliqueStart;
+
+            ui rank = ranks[i];
+
+            ui fStart = offset[rank];
+            ui eStart = eOffset[rank];
+
+            ui tFlow = totalCliques +  total + 2;
+
+            ui s = tFlow - 2;
+            ui t = tFlow - 1;
+
+            for(ui i=laneId; i < tFlow; i+=warpsize){
+                height[eStart + i ] = (i == s) ? total : 0;
+                excess[eStart+ i] = 0;
+
+            }
+            __syncwarp();
+
+            for(ui i=laneId; i < total; i+=warpsize){
+                ui vertex = flowNetwork.toEdge[fStart + 2*totalCliques+i ];
+                ui cap = flowNetwork.capacity[fStart + 2*totalCliques+i ];
+                flowNetwork.flow[fStart + 2*totalCliques+i ] = cap;
+                atomicAdd(&flowNetwork.excess[eStart + totalCliques+i ],cap);
+
+            }
+
+            __syncwarp();
+
+            bool active = true;
+            while (__any_sync(0xffffffff, active)){
+                active = false;
+                bool pushed = false;
+
+                ui head = 2*totalCliques+ 3* total;
+
+                // Push Vertex to sink
+                for(ui i= head + laneId; i < total; i+=warpsize){
+                    if (excess[eStart+i] > 0){
+
+                        //Alawys Sink
+                        ui v = flowNetwork.toEdge[offset + head + i ];
+                        ui cap = flowNetwork.capacity[offset + head + i ];
+                        ui flow = flowNetwork.flow[offset + head + i ];
+                        ui resCap = cap-flow;
+                        if(resCap>0 && flowNetwork.height[eStart+totalCliques+i]>flowNetwork.height[eStart+v]){
+                            int push_amt = min(flowNetwork.excess[u], resCap);
+                            atomicAdd(&flowNetwork.flow[offset + head + i], push_amt);
+                            atomicSub(&flowNetwork.excess[eStart+ totalCliques + i], push_amt);
+                            atomicAdd(&flowNetwork.excess[eStart+ totalCliques + v], push_amt);
+                            pushed = true;
+                            active = true;
+
+                        }
+
+                    }
+                }
+                
+                //Check if we can push from cliques to verticies
+                for(ui i=laneId; i < totalCliques; i+=warpsize){
+                    if (excess[eStart+i] > 0){
+                        
+                        for(ui x = 0; x <k;x++){
+                            ui v = flowNetwork.toEdge[offset + i* k +x ];
+                            ui cap = flowNetwork.capacity[offset + i* k +x ];
+                            ui flow = flowNetwork.flow[offset + i* k +x ];
+                            ui resCap = cap-flow;
+
+                            if(resCap>0 && flowNetwork.height[eStart+i]>flowNetwork.height[eStart+v]){
+                                int push_amt = min(flowNetwork.excess[eStart+i], resCap);
+                                atomicAdd(&flowNetwork.flow[offset + i* k +x ], push_amt);
+                                atomicSub(&flowNetwork.excess[eStart+i], push_amt);
+                                atomicAdd(&flowNetwork.excess[eStart+ v], push_amt);
+                                pushed = true;
+                                active = true;
+                            }
+
+                        }
+
+                    }
+
+                }
+
             
+                for(ui i= laneId; i < tFlow; i+=warpsize){
+
+                    int min_h = INT_MAX;
+                    ui nStart = flowNetwork.offset[i];
+                    for (ui j = flowNetwork.neighbors[nStart + i]; j < flowNetwork.neighbors[nStart + i+1]; ++j) {
+                        int v = csr_col_ind[eid];
+                        if (capacities[j] - flows[j] > 0)
+                            min_h = min(min_h, height[v]);
+                    }
+
+                }
+            
+            }
+
+            
+
+
         }
     }
 
@@ -909,7 +1031,88 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceCompone
 }
 
 
+__global__ void edmondsKarp(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter,ui *upperBound, ui *ranks,ui *offset, int *augmentedPaths, ui *BFS, ui apSize, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui lb){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
+    for(ui i = idx; i < totalComponents; i += TOTAL_THREAD){
+        if(upperBound[i]>lb){
+            ui alpha = (upperBound[i]+lb)/2;
+            ui offsetLoc;
+            ui start = conComp.componentOffset[i];
+            ui end = conComp.componentOffset[i+1];
+            ui total = end - start;
+
+            ui bais = 1/(total*(total-1));
+
+            ui cliqueStart = compCounter[i];
+            ui cliqueEnd = compCounter[i+1];
+            ui totalCliques = cliqueEnd-cliqueStart;
+
+            ui offset = offset[rank[i]];
+
+            ui apOffset = apSize*i;
+
+            ui s = totalCliques + total;
+            ui t = totalCliques + total + 1;
+
+            ui curent = s;
+            ui count = 1;
+            ui tail = 0;
+            BFS[apOffset] = s;
+            ui maxFlow =INF;
+            ui current;
+
+            while( (u-l) > bais ){
+
+                while(tail < count){
+                    ui current = BFS[apOffset + tail];
+                    tail++;
+                    if(current == t){
+
+                        while(current!=s){
+                            ui nStart= flowNetwork.offset[offset + augmentedPaths[current]];
+                            ui nEnd = flowNetwork.offset[offset + augmentedPaths[current]+1];
+                            for(ui j = nStart; j < nEnd; j++ ){
+                                if(j==current){
+                                    ui availCap =  flowNetwork.capacity[nStart+j] -flowNetwork.flow[nStart+j];
+                                    if(maxFlow > availCap){
+                                        maxflow = availCap;
+                                    }
+                                    
+                                    break;
+                                }
+                            }
+
+                            current = augmentedPaths[current];
+
+
+                        }
+
+                    }
+
+                    ui nStart= flowNetwork.offset[offset + current];
+                    ui nEnd = flowNetwork.offset[offset + current+1];
+
+                    for(ui j = nStart; j < nEnd; j++ ){
+                        ui v = flowNetwork.toEdge[nStart+j];
+                        ui availCap =  flowNetwork.capacity[nStart+j] -flowNetwork.flow[nStart+j];
+                        if((augmentedPaths[apOffset+v] == -1) && availCap>0){
+                            augmentedPaths[apOffset+v] = current;
+                            BFS[apOffset+count] = v;
+                            count++;
+                        }
+                    }
+
+                }
+                
+            }
+
+
+        }
+
+
+    }
+}
 
 
 
