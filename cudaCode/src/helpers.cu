@@ -493,37 +493,42 @@ __global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cl
    __syncwarp();
     for(ui j =laneId; j<tt; j+=warpSize){
     //printf("warpId %d laneId %u vertex %u check %d t %d \n",warpId,i,v,cliqueData.trie[j],t);
-
-        if( (v == cliqueData.trie[j]) && (cliqueData.status[j] == -1)){
-          //printf("inside warpId %d laneId %u vertex %u check %d \n",warpId,i,v,cliqueData.trie[j]);
-
-            for(ui x =1;x<k;x++){
-                ui u = cliqueData.trie[x*t+j];
-           // printf("inside warpId %d laneId %u vertex %u check %d u %d loc %d \n",warpId,j,v,cliqueData.trie[j],u,x*t+j);
-
-
-                int a = atomicSub(&G.cliqueCore[u],1);
-                if(a == level+1){
-                    ui loc = atomicAdd(&bufTail, 1);
-                    glBuffer[loc] = u;
-
+        if(cliqueData.status[j] == -1){
+            bool found = false;
+            ui w =0;
+            while(w<k){
+                if(cliqueData.trie[w*t+j] == v){
+                found = true;
+                break;
                 }
-                if(a <= level){
-                    atomicAdd(&G.cliqueCore[u], 1);
-                }
-               /* if(G.cliqueCore[u]<0){
-                  G.cliqueCore[u] = 0;
-                }*/
+                w++;
             }
-            cliqueData.status[j] = level;
+            if(found){
+
+                for(ui x =0;x<k;x++){
+
+                    if(x==w) continue;
+                    ui u = cliqueData.trie[x*t+j];
+                    int a = atomicSub(&G.cliqueCore[u],1);
+                    if(a == level+1){
+                        ui loc = atomicAdd(&bufTail, 1);
+                        glBuffer[loc] = u;
+
+                    }
+                    if(a <= level){
+                        atomicAdd(&G.cliqueCore[u], 1);
+                    }
+
+                }
+                cliqueData.status[j] = level;
 
 
+            }
         }
     }
 
     __syncwarp();
     if(laneId == 0 && bufTail>0){
-      //printf("warpId %d thid %d buffTail %d v %d base %d \n",warpId,threadIdx.x, bufTail,v,base);
       atomicAdd(globalCount, 1); // atomic since contention among blocks
     }
 }
@@ -566,25 +571,39 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
         ui idx = threadIdx.x;
 
         for(ui j = idx; j<tt; j+= BLK_DIM){
+            
+            if(cliqueData.status[j]==-1){
 
-            if( (v == cliqueData.trie[j]) && (cliqueData.status[j]==-1)){
-                for(ui x =1;x<k;x++){
-                    ui u = cliqueData.trie[x*t+j];
-                    int a = atomicSub(&G.cliqueCore[u], 1);
-                    if(a == level+1){
-                        ui loc = atomicAdd(&bufTail, 1);
-                        glBuffer[loc] = u;
-
+                bool found = false;
+                ui w =0;
+                while(w<k){
+                    if(cliqueData.trie[w*t+j] == v){
+                    found = true;
+                    break;
                     }
-                    if(a <= level){
-                        atomicAdd(&G.cliqueCore[u], 1);
-                    }
+                    w++;
                 }
-                cliqueData.status[j] = level;
+
+                if(found){
+                    for(ui x =0;x<k;x++){
+                        if(x==w) continue;
+
+                        ui u = cliqueData.trie[x*t+j];
+                        int a = atomicSub(&G.cliqueCore[u], 1);
+                        if(a == level+1){
+                            ui loc = atomicAdd(&bufTail, 1);
+                            glBuffer[loc] = u;
+
+                        }
+                        if(a <= level){
+                            atomicAdd(&G.cliqueCore[u], 1);
+                        }
+                    }
+                    cliqueData.status[j] = level;
 
 
+                }
             }
-
         }
 
 
@@ -1128,8 +1147,6 @@ __global__ void edmondsKarp(deviceFlowNetworkPointers flowNetwork, deviceCompone
 
     }
 }
-
-
 
 __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter, ui *lowerBound, ui *upperBound, ui *ccOffset,  ui *neighborSize, ui totalComponenets, ui k, ui maxDensity){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
