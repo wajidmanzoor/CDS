@@ -238,15 +238,15 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
 }
 
 
-ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, densestCorePointer &densestCore, ui coreSize, ui coreTotalCliques, ui lowerBoundDensity){
-    memoryAllocationDensestCore(densestCore, coreSize, lowerBoundDensity , coreTotalCliques);
+ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, densestCorePointer &densestCore, ui coreSize, ui coreTotalCliques, ui maxCore){
+    memoryAllocationDensestCore(densestCore, coreSize, maxCore , coreTotalCliques);
 
     ui *globalCount;
 
     chkerr(cudaMalloc((void**)&globalCount, sizeof(ui)));
     chkerr(cudaMemset(globalCount, 0, sizeof(ui)));
 
-    generateDensestCore<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,densestCore,globalCount,graph.n,lowerBoundDensity,TOTAL_WARPS);
+    generateDensestCore<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,densestCore,globalCount,graph.n,maxCore,TOTAL_WARPS);
     cudaDeviceSynchronize();
 
 
@@ -267,7 +267,7 @@ ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, dens
     thrust::scatter(d_indices.begin(), d_indices.end(), d_vertex_map_ptr, d_reverse_map_ptr);
 
     size_t sharedMemoryGenNeighCore =  WARPS_EACH_BLK * sizeof(ui);
-    generateNeighborDensestCore<<<BLK_NUMS, BLK_DIM,sharedMemoryGenNeighCore>>>(deviceGraph,densestCore,lowerBoundDensity,TOTAL_WARPS);
+    generateNeighborDensestCore<<<BLK_NUMS, BLK_DIM,sharedMemoryGenNeighCore>>>(deviceGraph,densestCore,maxCore,TOTAL_WARPS);
     cudaDeviceSynchronize();
 
     return edgeCountCore;
@@ -276,12 +276,12 @@ ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, dens
 }
 
 ui prune(densestCorePointer &densestCore, deviceCliquesPointer &cliqueData, devicePrunedNeighbors &prunedNeighbors,
-    ui vertexCount, ui edgecount, ui k, ui t, ui tt, ui lowerBoundDensity) {
+    ui vertexCount, ui edgecount, ui k, ui t, ui tt, ui maxCore) {
 
     thrust::device_ptr<ui> d_pruneStatus(prunedNeighbors.pruneStatus);
     thrust::fill(d_pruneStatus, d_pruneStatus + edgecount, 1);
 
-    pruneEdges<<<BLK_NUMS, BLK_DIM>>>(densestCore, cliqueData,prunedNeighbors.pruneStatus, t, tt, k, lowerBoundDensity);
+    pruneEdges<<<BLK_NUMS, BLK_DIM>>>(densestCore, cliqueData,prunedNeighbors.pruneStatus, t, tt, k, maxCore);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Get prune status of each edge");
 
@@ -452,8 +452,9 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
                 unsigned int M = d_counter[i+1] - d_counter[i];
                 unsigned int V = d_offset[i+1] - d_offset[i];
                 return 2 * M * k + 4 * V;  
+            }else{
+                return 0u;
             }
-            return 0u;
         },
         0u,
         thrust::plus<unsigned int>()
@@ -572,9 +573,7 @@ int main(int argc, const char * argv[]) {
     cliqueCoreDecompose(graph,deviceGraph,cliqueData,maxCore, maxDensity, coreSize, coreTotalCliques,glBufferSize, k,  t, tt);
 
     //LOCATE CORE
-    ui lowerBoundDensity = static_cast<ui>(std::ceil(maxDensity));
-
-    ui edgecount = generateDensestCore(graph,deviceGraph,  densestCore, coreSize, coreTotalCliques,lowerBoundDensity);
+    ui edgecount = generateDensestCore(graph,deviceGraph,  densestCore, coreSize, coreTotalCliques,maxCore);
     //LISTING AGAIN not need added level as status of each clique to track the cores
 
 
@@ -582,7 +581,7 @@ int main(int argc, const char * argv[]) {
     ui vertexCount;
     chkerr(cudaMemcpy(&vertexCount, densestCore.n, sizeof(ui), cudaMemcpyDeviceToHost));
 
-    ui newEdgeCount = prune(densestCore, cliqueData, prunedNeighbors, vertexCount, edgecount, k, t, tt, lowerBoundDensity);
+    ui newEdgeCount = prune(densestCore, cliqueData, prunedNeighbors, vertexCount, edgecount, k, t, tt, maxCore);
     
     //COMPONENT DECOMPOSE
     memoryAllocationComponent(conComp, vertexCount , newEdgeCount);
