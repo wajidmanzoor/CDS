@@ -22,8 +22,8 @@ __global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cl
 __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer cliqueData, ui *bufTails,ui *glBuffers, ui *globalCount, ui glBufferSize, ui n, ui level, ui k, ui t, ui tt);
 
 //kernel function to locate the densest core 
-__global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer densestCore,ui *globalCount, ui n, ui density, ui totalWarps);
-__global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui density, ui totalWarps);
+__global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer densestCore,ui *globalCount, ui n, ui maxDensityCore, ui totalWarps);
+__global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui maxDensityCore, ui totalWarps);
 
 
 //Kernel function to prune edges

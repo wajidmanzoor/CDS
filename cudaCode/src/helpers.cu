@@ -615,13 +615,13 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
     }
 }
 
-__global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer densestCore,ui *globalCount, ui n, ui density, ui totalWarps){
+__global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer densestCore,ui *globalCount, ui n, ui maxDensityCore, ui totalWarps){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
 
     for(ui i = warpId; i < n; i += totalWarps){
-        if(G.cliqueCore[i]>= density){
+        if(G.cliqueCore[i]>= maxDensityCore){
             ui loc;
             if(laneId==0){
                 loc = atomicAdd(globalCount,1);
@@ -635,7 +635,7 @@ __global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer de
             int count = 0;
             for(int j = laneId; j < total; j += warpSize) {
                 neigh = G.neighbors[start + j];
-                if(G.cliqueCore[neigh] >= density) {
+                if(G.cliqueCore[neigh] >= maxDensityCore) {
                     count++;
                 }
             }
@@ -650,7 +650,7 @@ __global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer de
     }
 }
 
-__global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui density, ui totalWarps) {
+__global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePointer densestCore, ui maxDensityCore, ui totalWarps) {
 
     extern __shared__ char sharedMemory[];
     ui sizeOffset = 0;
@@ -674,7 +674,7 @@ __global__ void generateNeighborDensestCore(deviceGraphPointers G, densestCorePo
         for(int j = laneId; j < total; j += warpSize) {
             neigh = G.neighbors[start + j];
 
-            if(G.cliqueCore[neigh] >= density) {
+            if(G.cliqueCore[neigh] >= maxDensityCore) {
                 int loc = atomicAdd(&counter[threadIdx.x / warpSize], 1);
 
                 densestCore.neighbors[loc] = densestCore.reverseMap[neigh];
