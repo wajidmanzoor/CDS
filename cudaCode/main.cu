@@ -440,6 +440,16 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
     getLbUbandSize<<<BLK_NUMS, BLK_DIM>>>( conComp, compCounter, lowerBound, upperBound, ccoffset,  neighborSize, totalComponents, k, md);
     CUDA_CHECK_ERROR("Get LB and UB ");
 
+    thrust::inclusive_scan(
+        thrust::device_pointer_cast(ccoffset),
+        thrust::device_pointer_cast(ccoffset + totalComponents + 1),
+        thrust::device_pointer_cast(ccoffset));
+
+    thrust::inclusive_scan(
+        thrust::device_pointer_cast(neighborSize),
+        thrust::device_pointer_cast(neighborSize + totalComponents + 1),
+        thrust::device_pointer_cast(neighborSize));
+
 
     // Reusable device pointers
     thrust::device_ptr<unsigned int> d_counter(compCounter);
