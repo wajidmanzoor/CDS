@@ -51,11 +51,12 @@ void memoryAllocationDAG(deviceDAGpointer &D, ui n, ui m) {
     cudaDeviceSynchronize();
 }*/
 
-void memoryAllocationComponent(deviceComponentPointers &C, ui n, ui m) {
-    chkerr(cudaMalloc((void**)&(C.componentOffset), (n + 1) * sizeof(ui)));
-    chkerr(cudaMemset(C.componentOffset, 0, (n + 1) * sizeof(ui)));
+void memoryAllocationComponent(deviceComponentPointers &C,ui totalComponents, ui n, ui m) {
+    chkerr(cudaMalloc((void**)&(C.componentOffset), (totalComponents + 1) * sizeof(ui)));
+    chkerr(cudaMemset(C.componentOffset, 0, (totalComponents + 1) * sizeof(ui)));
     chkerr(cudaMalloc((void**)&(C.components), n * sizeof(ui)));
     chkerr(cudaMalloc((void**)&(C.mapping), n * sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(C.reverseMapping), n * sizeof(ui)))
     cudaDeviceSynchronize();
 }
 

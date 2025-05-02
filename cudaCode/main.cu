@@ -450,91 +450,15 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
         thrust::device_pointer_cast(neighborSize + totalComponents + 1),
         thrust::device_pointer_cast(neighborSize));
 
+    ui flowVertexCount, flowNeighborCount;
 
-    // Reusable device pointers
-    thrust::device_ptr<unsigned int> d_counter(compCounter);
-    thrust::device_ptr<unsigned int> d_offset(conComp.componentOffset);
-    thrust::device_ptr<double> d_lowerBound(lowerBound);
-    thrust::device_ptr<double> d_upperBound(upperBound);
+    chkerr(cudaMemcpy(&flowVertexCount,ccoffset+totalComponents,sizeof(ui),cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(&flowNeighborCount,ccoffset+totalComponents,sizeof(ui),cudaMemcpyDeviceToHost));
 
-    // Lower bound calculation
-    auto lower_bound_calc = [=] __host__ __device__ (unsigned int i) {
-        unsigned int d_diff = d_counter[i+1] - d_counter[i];
-        unsigned int s_diff = d_offset[i+1] - d_offset[i];
-        return static_cast<double>(d_diff) / s_diff;
-    };
+    
 
-    thrust::transform(
-        thrust::counting_iterator<unsigned int>(0),
-        thrust::counting_iterator<unsigned int>(totalComponents),
-        d_lowerBound,
-        lower_bound_calc
-    );
-    double lb = *(thrust::max_element(d_lowerBound, d_lowerBound + totalComponents));
-
-    // Upper bound calculation
-    const double k_fact = tgamma(k + 1);
-    const double denominator = pow(k_fact, 1.0 / k);
-    const double densest_density = *densestcore.density;
-
-    auto upper_bound_calc = [=] __host__ __device__ (unsigned int i) {
-        unsigned int d = d_counter[i+1] - d_counter[i];
-        unsigned int s = d_offset[i+1] - d_offset[i];
-        double numerator = pow(static_cast<double>(d), (k - 1.0) / k);
-        double value = numerator / denominator;
-        return min(value, densest_density);
-    };
-
-    thrust::transform(
-        thrust::counting_iterator<unsigned int>(0),
-        thrust::counting_iterator<unsigned int>(totalComponents),
-        d_upperBound,
-        upper_bound_calc
-    );
-
-    // Size calculation for flow network
-    unsigned int totalSize = thrust::transform_reduce(
-        thrust::counting_iterator<unsigned int>(0),
-        thrust::counting_iterator<unsigned int>(totalComponents),
-        [=] __host__ __device__ (unsigned int i) {
-            if (d_upperBound[i] > lb) {
-                unsigned int M = d_counter[i+1] - d_counter[i];
-                unsigned int V = d_offset[i+1] - d_offset[i];
-                return 2 * M * k + 4 * V;  
-            }else{
-                return 0u;
-            }
-        },
-        0u,
-        thrust::plus<unsigned int>()
-    );
-
-
-    // Store the loaction of flow network for each graph
-    int* ranks;
-    cudaMalloc((void**)&ranks, totalComponents * sizeof(int));
-    thrust::device_ptr<int> d_ranks(ranks);
-    thrust::transform(
-        thrust::device_ptr<const double>(d_upperBound),
-        thrust::device_ptr<const double>(d_upperBound + totalComponents),
-        d_ranks,
-        [lb] __host__ __device__ (double val) {
-            return (val > lb) ? 1 : 0;
-        }
-    );
-    thrust::exclusive_scan(d_ranks, d_ranks + totalComponents, d_ranks);
-    thrust::transform(
-        thrust::device_ptr<const double>(d_upperBound),  // Original values
-        thrust::device_ptr<const double>(d_upperBound + totalComponents),
-        d_ranks,                                        // Current ranks
-        d_ranks,                                        // Output
-        [lb] __host__ __device__ (double val, int rank) {
-            return (val > lb) ? rank : -1;
-        }
-    );
-
-
-    memoryAllocationComponent(conComp, vertexCount , newEdgeCount);
+    memoryAllocationFlowNetwork(flowNetwork, flowVertexCount, flowNeighborCount, totalComponents);
+    
     //Create a flow network for each component
     createFlowNetwork<<<BLK_NUMS, BLK_DIM>>>(flowNetwork, conComp, densestCore, finalCliqueData, compCounter, counter,upperBound, vertexCount,newEdgeCount, TOTAL_WARPS, totalComponents, k, lb);
  
