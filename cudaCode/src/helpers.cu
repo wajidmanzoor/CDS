@@ -859,25 +859,30 @@ __global__ void getConnectedComponentStatus(deviceComponentPointers conComp,devi
 
 }
 
-__global__ void rearrangeCliqueData(deviceComponentPointers conComp,deviceCliquesPointer cliqueData, deviceCliquesPointer finalCliqueData,densestCorePointer densestCore, ui *compCounter,ui *counter,ui t, ui tt, ui k, ui totalThreads){
+__global__ void rearrangeCliqueData(deviceComponentPointers conComp,deviceCliquesPointer cliqueData, deviceCliquesPointer finalCliqueData,densestCorePointer densestCore, ui *compCounter,ui *counter,ui t, ui tt, ui k,ui totaLCliques, ui totalThreads){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    for(ui i =0; i<tt;i +=totalThreads){
-        ui loc; 
-        for(ui j=0;j<k;j++){
-            ui vertex = conComp.reverseMap[densestCore.reverseMap[cliqueData.trie[j*k + i]]];
-            ui conComp = = conComp.components[vertex];
-            ui offset = compCounter[conComp];
-            if(j==0){
-                loc = atomicAdd(&counter[conComp],1);
+    for(ui i =idx; i<tt;i +=totalThreads){
+        
+        int comp =  cliqueData.status[i];
 
-            }
-            finalCliqueData.trie[offset + j*k + loc ] = vertex;
+        if(comp>-1){
+          ui loc; 
+          for(ui j=0;j<k;j++){
+              ui vertex = cliqueData.trie[j*t + i];
+              ui offset = compCounter[comp];
+              if(j==0){
+                  loc = atomicAdd(&counter[comp],1);
+                  finalCliqueData.status[offset + loc ] = comp;
+
+
+              }
+              finalCliqueData.trie[offset + j*totaLCliques + loc ] = vertex;
+          }
         }
         
     }
 
 }
-
 __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter, ui *lowerBound, ui *upperBound, ui *ccOffset,  ui *neighborSize, ui totalComponenets, ui k, ui maxDensity){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx==0){
