@@ -832,15 +832,29 @@ __global__ void componentDecomposek(deviceComponentPointers conComp, devicePrune
     }
 }
 
-__global__ void getConnectedComponentStatus(deviceComponentPointers conComp,deviceCliquesPointer cliqueData, densestCorePointer densestCore, ui *compCounter, ui *counter, ui t, ui tt, ui totalThreads){
+__global__ void getConnectedComponentStatus(deviceComponentPointers conComp,deviceCliquesPointer cliqueData, densestCorePointer densestCore, ui *compCounter, ui t, ui tt, ui k,ui maxCore, ui totalThreads){
 
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-    for(ui i =0; i<tt;i +=totalThreads){
-        ui vertex = conComp.reverseMap[densestCore.reverseMap[cliqueData.trie[i]]];
-        ui conComp = = conComp.components[vertex];
-        cliqueData.status[i] = conComp;
-        atomicAdd(&compCounter[conComp+1],1);
+    for(ui i =idx; i<tt;i +=totalThreads){
+        if(cliqueData.status[i]>=maxCore){
+          int comp = INT_MAX;
+
+          for(ui x=0;x<k;x++){
+            ui vertex =densestCore.reverseMap[cliqueData.trie[x*t + i]];
+            comp = min(comp,conComp.components[vertex]);
+
+            cliqueData.trie[x*t + i] = vertex;
+
+
+          }
+          cliqueData.status[i] = comp;
+          atomicAdd(&compCounter[comp+1],1);
+
+        
+      }else{
+        cliqueData.status[i] = -1;
+      }
     }
 
 }
@@ -861,6 +875,38 @@ __global__ void rearrangeCliqueData(deviceComponentPointers conComp,deviceClique
         }
         
     }
+
+}
+
+__global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter, ui *lowerBound, ui *upperBound, ui *ccOffset,  ui *neighborSize, ui totalComponenets, ui k, ui maxDensity){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx==0){
+        ccOffset[idx]=0;
+    }
+
+    for(ui i = idx; i<totalComponenets; i+=TOTAL_THREAD ){
+        ui totalCliques = compCounter[i+1] - compCounter[i];
+        ui totalSize = conComp.componentOffset[i+1] -  conComp.componentOffset[i];
+        double lb = (double) (totalCliques)/totalSize;
+        atomicMax(lowerBound, lb);
+
+        double den = power(fact(k),1.0/k);
+        double num = power(totalCliques, (k-1.0)/k);
+        double up = max(maxDensity, num/dem);
+
+        upperBound[i] = up;
+
+        if(up>lb){
+            ccOffset[i+1] = totalCliques + totalSize + 2;
+            atomicAdd(neighborSize, 2*totalCliques*k + 4*totalSize);
+
+
+        }
+        else{
+            ccOffset[i+1] = 0;
+        }
+    }
+
 
 }
 
@@ -1148,37 +1194,6 @@ __global__ void edmondsKarp(deviceFlowNetworkPointers flowNetwork, deviceCompone
     }
 }
 
-__global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter, ui *lowerBound, ui *upperBound, ui *ccOffset,  ui *neighborSize, ui totalComponenets, ui k, ui maxDensity){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if(idx==0){
-        ccOffset[idx]=0;
-    }
-
-    for(ui i = idx; i<totalComponenets; i+=TOTAL_THREAD ){
-        ui totalCliques = compCounter[i+1] - compCounter[i];
-        ui totalSize = conComp.componentOffset[i+1] -  conComp.componentOffset[i];
-        double lb = (double) (totalCliques)/totalSize;
-        atomicMax(lowerBound, lb);
-
-        double den = power(fact(k),1.0/k);
-        double num = power(totalCliques, (k-1.0)/k);
-        double up = max(maxDensity, num/dem);
-
-        upperBound[i] = up;
-
-        if(up>lb){
-            ccOffset[i+1] = totalCliques + totalSize + 2;
-            atomicAdd(neighborSize, 2*totalCliques*k + 4*totalSize);
-
-
-        }
-        else{
-            ccOffset[i+1] = 0;
-        }
-    }
-
-
-}
 
 /*__global__ void createPaths(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, ui totalWarps, int totalComponents, ui k, ui alpha){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
