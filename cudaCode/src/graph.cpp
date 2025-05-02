@@ -98,4 +98,9 @@ void Graph::coreDecompose(std::vector<ui>& arr) {
             }
         }
     }
+
+    kmax = core[0];  // Initialize with first element
+    for (ui val : core) {
+        if (val > kmax) kmax = val;
+    }
 }
