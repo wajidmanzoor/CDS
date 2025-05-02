@@ -161,7 +161,10 @@ void memoryAllocationPrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors, ui
 
 void memoryAllocationFlowNetwork(deviceFlowNetworkPointers &flowNetwork, ui vertexSize, ui neighborSize, ui totalComponents){
 
-    chkerr(cudaMalloc((void**)&(flowNetwork.offset), (vertexSize + totalComponents) * sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(flowNetwork.offset), (1 + totalComponents) * sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(flowNetwork.neighborOffset1), (1 + totalComponents) * sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(flowNetwork.neighborOffset2), (neighborSize+1) * sizeof(ui)));
+
     chkerr(cudaMalloc((void**)&(flowNetwork.toEdge), neighborSize * sizeof(ui)));
 
     chkerr(cudaMalloc((void**)&(flowNetwork.capacity), neighborSize * sizeof(capacity)));

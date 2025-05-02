@@ -68,6 +68,7 @@ typedef struct  {
     ui *componentOffset;
     ui *components;
     ui *mapping;
+    int *reverseMapping;
 }deviceComponentPointers;
 
 typedef struct  {
@@ -127,9 +128,10 @@ typedef struct{
 
 }devicePrunedNeighbors;
 
-typedef struct{
-    ui *ccOffset; //Gives offset for where the neighbor offset starts for each connected component;
-    ui *offset; // Gives neighbor offset of each connected componenet.
+typedef struct{ 
+    ui *offset; 
+    ui *neighborOffset1;
+    ui *neighborOffset2;
     ui *toEdge; // neighbors
     double *capacity;
     double *flow;
