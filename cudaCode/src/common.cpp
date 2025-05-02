@@ -8,5 +8,7 @@ deviceCliquesPointer cliqueData;
 densestCorePointer  densestCore;
 deviceComponentPointers conComp;
 devicePrunedNeighbors prunedNeighbors;
+deviceFlowNetworkPointers flowNetwork;
+
 deviceCliquesPointer finalCliqueData;
 
