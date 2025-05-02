@@ -418,10 +418,28 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
     //TODO: MIGHT BE BETTER IF I JUST USE ON KERNEL TO DO THIS ALL THRUST STUFF
 
     // Memory allocation for bounds
+
     double* bounds;
-    chkerr(cudaMalloc((void**)&bounds, 2 * totalComponents * sizeof(double)));
+    chkerr(cudaMalloc((void**)&bounds, (totalComponents*2)* sizeof(double)));
     double* upperBound = bounds;
     double* lowerBound = bounds + totalComponents;
+
+    ui *ccoffset, *neighborSize;
+    chkerr(cudaMalloc((void**)&ccoffset,(totalComponents+1)*sizeof(ui)));
+    chkerr(cudaMalloc((void**)&neighborSize,(totalComponents+1)*sizeof(ui)));
+    
+    thrust::device_ptr<int> d_cliqueCore(deviceGraph.cliqueCore);
+    
+    // Find the maximum element using thrust::reduce
+    int max_int = thrust::reduce(d_cliqueCore, d_cliqueCore + graph.n, 
+                               0, thrust::maximum<int>());
+    
+    // Convert to double and return
+    double md =  static_cast<double>(max_int);
+
+    getLbUbandSize<<<BLK_NUMS, BLK_DIM>>>( conComp, compCounter, lowerBound, upperBound, ccoffset,  neighborSize, totalComponents, k, md);
+    CUDA_CHECK_ERROR("Get LB and UB ");
+
 
     // Reusable device pointers
     thrust::device_ptr<unsigned int> d_counter(compCounter);
