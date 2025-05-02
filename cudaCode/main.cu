@@ -425,7 +425,7 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
     double* lowerBound = bounds + totalComponents;
 
     ui *ccoffset, *neighborSize;
-    chkerr(cudaMalloc((void**)&ccoffset,(totalComponents+1)*sizeof(ui)));
+    chkerr(cudaMalloc((void**)&flowNetwork.offset,(totalComponents+1)*sizeof(ui)));
     chkerr(cudaMalloc((void**)&neighborSize,(totalComponents+1)*sizeof(ui)));
     
     thrust::device_ptr<int> d_cliqueCore(deviceGraph.cliqueCore);
