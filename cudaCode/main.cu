@@ -390,19 +390,30 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
     chkerr(cudaMalloc((void**)&(compCounter), (totalComponents+1)* sizeof(ui)));
     chkerr(cudaMemset(compCounter, 0, (totalComponents+1) * sizeof(ui)));
 
-    // Get total cliques of each connected components
-    getConnectedComponentStatus<<<BLK_NUMS, BLK_DIM>>>(conComp,cliqueData, densestCore, compCounter,t, tt, totalThreads);
+    getConnectedComponentStatus<<<BLK_NUMS, BLK_DIM>>>(conComp,cliqueData, densestCore,compCounter,t, tt,k, maxCore,TOTAL_THREAD);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Calculate total cliques for each Component");
 
-    // make it offset with cummilative sum 
     thrust::inclusive_scan(
         thrust::device_pointer_cast(compCounter),
         thrust::device_pointer_cast(compCounter + totalComponents + 1),
         thrust::device_pointer_cast(compCounter));
 
+
+    ui totaLCliques;
+    chkerr(cudaMemcpy(&totaLCliques,compCounter+totalComponents,sizeof(ui),cudaMemcpyDeviceToHost));
+
     // Allocate memory for new clique data arranged my connected component
-    memoryAllocationTrie(finalCliqueData, tt, k);
+    memoryAllocationTrie(finalCliqueData, totaLCliques, k);
+
+    ui *counter;
+    chkerr(cudaMalloc((void**)&(counter), totalComponents* sizeof(ui)));
+    chkerr(cudaMemset(counter, 0, totalComponents * sizeof(ui)));
+    rearrangeCliqueData<<<BLK_NUMS, BLK_DIM>>>(conComp, cliqueData,  finalCliqueData, densestCore, compCounter, counter, t,  tt,  k, totaLCliques,TOTAL_THREAD);
+    CUDA_CHECK_ERROR("Rearrange Clique Data");
+    cudaFree(cliqueData);
+
+
 
     //TODO: MIGHT BE BETTER IF I JUST USE ON KERNEL TO DO THIS ALL THRUST STUFF
 
