@@ -335,6 +335,30 @@ int componentDecompose(deviceComponentPointers &conComp,devicePrunedNeighbors &p
 
     }while(hostChanged>0);
 
+    // unique component
+    thrust::device_vector<int> uniqueComponents(vertexCount);
+    auto new_end = thrust::unique_copy(components , components + vertexCount,
+                                    uniqueComponents.begin());
+    int totalComponents = new_end - uniqueComponents.begin();
+
+    //Create component offset
+    thrust::device_ptr<ui> componentOffsets(conComp.componentOffset);
+    thrust::lower_bound(components , components + vertexCount,
+                    uniqueComponents.begin(), uniqueComponents.begin() + totalComponents,
+                    componentOffsets);
+    componentOffsets[totalComponents] = vertexCount;
+
+    uniqueComponents.resize(totalComponents);
+
+    thrust::sort(uniqueComponents.begin(), uniqueComponents.end());
+
+
+    thrust::lower_bound(
+        uniqueComponents.begin(), uniqueComponents.end(),
+        components, components + vertexCount,
+        components // In-place remap
+    );
+
     //Vertices in Densest Core, use mapping to get actual verticies
     thrust::device_ptr<ui> vertices(densestCore.mapping);
 
@@ -346,20 +370,6 @@ int componentDecompose(deviceComponentPointers &conComp,devicePrunedNeighbors &p
       thrust::device_pointer_cast(conComp.mapping) 
     );
 
-
-
-    // unique component
-    thrust::device_vector<int> uniqueComponents(vertexCount);
-    auto new_end = thrust::unique_copy(components , components + vertexCount,
-                                   uniqueComponents.begin());
-    int totalComponents = new_end - uniqueComponents.begin();
-
-    //Create component offset
-    thrust::device_ptr<ui> componentOffsets(conComp.componentOffset);
-    thrust::lower_bound(components , components + vertexCount,
-                    uniqueComponents.begin(), uniqueComponents.begin() + totalComponents,
-                    componentOffsets);
-    componentOffsets[totalComponents] = vertexCount;
 
     return totalComponents;
 
