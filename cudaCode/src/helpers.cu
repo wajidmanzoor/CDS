@@ -883,37 +883,42 @@ __global__ void rearrangeCliqueData(deviceComponentPointers conComp,deviceClique
     }
 
 }
-__global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter, ui *lowerBound, ui *upperBound, ui *ccOffset,  ui *neighborSize, ui totalComponenets, ui k, ui maxDensity){
+__global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter, double *lowerBound, double *upperBound, ui *ccOffset,  ui *neighborSize, ui totalComponenets, ui k, double maxDensity){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx==0){
         ccOffset[idx]=0;
+        neighborSize[idx]=0;
+
     }
 
     for(ui i = idx; i<totalComponenets; i+=TOTAL_THREAD ){
         ui totalCliques = compCounter[i+1] - compCounter[i];
         ui totalSize = conComp.componentOffset[i+1] -  conComp.componentOffset[i];
         double lb = (double) (totalCliques)/totalSize;
-        atomicMax(lowerBound, lb);
+        lowerBound[i]  = lb;
 
-        double den = power(fact(k),1.0/k);
-        double num = power(totalCliques, (k-1.0)/k);
-        double up = max(maxDensity, num/dem);
+        double dem = pow(fact(k),1.0/k);
+        double num = pow(totalCliques, (k-1.0)/k);
+        double ub = max(maxDensity, num/dem);
 
-        upperBound[i] = up;
+        upperBound[i] = ub;
 
-        if(up>lb){
+        if(ub>lb){
             ccOffset[i+1] = totalCliques + totalSize + 2;
-            atomicAdd(neighborSize, 2*totalCliques*k + 4*totalSize);
+            neighborSize[i+1] = 2*totalCliques*k + 4*totalSize;
 
 
         }
         else{
             ccOffset[i+1] = 0;
+            neighborSize[i+1] = 0;
+
         }
     }
 
 
 }
+
 
 __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter,ui *upperBound, ui *offset,ui *rank, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui lb) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
