@@ -42,6 +42,7 @@ typedef unsigned short ushort;
 typedef unsigned char uchar;
 
 const int INF = 1000000000;
+const double DINF = 1000000000.0;
 
 
 typedef struct  {

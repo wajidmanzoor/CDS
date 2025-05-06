@@ -1184,6 +1184,100 @@ __global__ void edmondsKarp(deviceFlowNetworkPointers flowNetwork, deviceCompone
 }
 
 
+__global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,double *upperBound , ui totalWarps, ui totalComponents, ui k, double lb, ui t){
+
+
+
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int warpId = idx / warpSize;
+    int laneId = idx % warpSize;
+
+    for(ui i = warpId; i < totalComponents; i += totalWarps){
+
+        if(upperBound[i]>lb){
+
+            ui start = conComp.componentOffset[i];
+            ui end = conComp.componentOffset[i+1];
+            ui total = end - start;
+            ui startClique = compCounter[i];
+            ui totalCliques = compCounter[i+1]-compCounter[i];
+
+            ui vertexOffset = flowNetwork.offset[i];
+            ui neighborOffset1 = flowNetwork.neighborOffset1[i];
+
+            double alpha = upperBound[i]/lb;
+
+            //printf("warpid %d laneId %d start %d end %d total %d neighborOffset %d \n",warpId,laneId,start,end,total,neighborOffset);
+
+            for (ui j = laneId; j < total; j += warpSize){
+                ui neighborOffset = flowNetwork.neighborOffset2[vertexOffset+j];
+
+                
+                // Vertex to sink 
+                flowNetwork.Edges[neighborOffset] = total+totalCliques+1;
+                flowNetwork.capacityForward[neighborOffset] = alpha * k;
+                flowNetwork.capacityBackward[neighborOffset] = 0.0;
+
+
+                ui vertex = conComp.mapping[start+j];
+
+                ui cliqueDegree = flowNetwork.neighborOffset2[vertexOffset+j + 1] - flowNetwork.neighborOffset2[vertexOffset+j];
+               
+            
+                ui temp= 1;
+
+                for(ui x =0; x < totalCliques; x ++){
+                    ui u;
+                    for(ui k_ = 0; k_<k;k_++){
+                      u = finalCliqueData.trie[t*k_ + startClique+x];
+                      if (u==vertex){
+                        //vertex to clique
+                        flowNetwork.Edges[neighborOffset+ temp] = total+x;
+                        flowNetwork.capacityForward[neighborOffset+ temp] = 1.0;
+                        flowNetwork.capacityBackward[neighborOffset+ temp] = 0.0;
+                        temp++;
+                        }                    
+                    }
+                    if(temp==cliqueDegree){
+                        break;
+                    }
+  
+  
+                  }
+                
+            }
+            for (ui j = laneId; j < totalCliques; j += warpSize){
+                ui neighborOffset = flowNetwork.neighborOffset2[vertexOffset+total+j];
+                ui u;
+                for(ui k_ = 0; k_<k;k_++){
+                    u = finalCliqueData.trie[t*k_ + startClique+j];
+                    flowNetwork.Edges[neighborOffset+ k_ ] = u;
+                    flowNetwork.capacityForward[neighborOffset+ k_] = DINF;
+                    flowNetwork.capacityBackward[neighborOffset+ k_] = 0.0;
+                    
+                }                
+                        
+      
+            }
+            ui neighborOffset = flowNetwork.neighborOffset2[vertexOffset+total+totalCliques];
+
+            for (ui j = laneId; j < total; j += warpSize){
+                flowNetwork.Edges[neighborOffset+ j] = j;
+                ui cliqueDegree = flowNetwork.neighborOffset2[vertexOffset+j + 1] - flowNetwork.neighborOffset2[vertexOffset+j];
+
+                flowNetwork.capacityForward[neighborOffset+ k_] = (double) cliqueDegree;
+                flowNetwork.capacityBackward[neighborOffset+ k_] = 0.0 ;
+
+            }
+
+
+                
+            }
+
+    }
+ }
+
+
 /*__global__ void createPaths(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, ui totalWarps, int totalComponents, ui k, ui alpha){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
