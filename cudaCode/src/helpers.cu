@@ -1251,7 +1251,7 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
                 ui u;
                 for(ui k_ = 0; k_<k;k_++){
                     u = finalCliqueData.trie[t*k_ + startClique+j];
-                    flowNetwork.Edges[neighborOffset+ k_ ] = u;
+                    flowNetwork.Edges[neighborOffset+ k_ ] = conComp. ;
                     flowNetwork.capacityForward[neighborOffset+ k_] = DINF;
                     flowNetwork.capacityBackward[neighborOffset+ k_] = 0.0;
                     
