@@ -132,9 +132,11 @@ typedef struct{
     ui *offset; 
     ui *neighborOffset1;
     ui *neighborOffset2;
-    ui *toEdge; // neighbors
-    double *capacity;
-    double *flow;
+    ui *Edges; // neighbors
+    double *capacityForward;
+    double *capacityBackward;
+    double *flowForward;
+    double *flowBackward;
     ui *height;
     double *excess;
 
