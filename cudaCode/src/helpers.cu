@@ -883,6 +883,7 @@ __global__ void rearrangeCliqueData(deviceComponentPointers conComp,deviceClique
     }
 
 }
+
 __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter, double *lowerBound, double *upperBound, ui *ccOffset,  ui *neighborSize, ui totalComponenets, ui k, double maxDensity){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx==0){
@@ -899,13 +900,13 @@ __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter,
 
         double dem = pow(fact(k),1.0/k);
         double num = pow(totalCliques, (k-1.0)/k);
-        double ub = max(maxDensity, num/dem);
+        double ub = min(maxDensity, num/dem);
 
         upperBound[i] = ub;
 
         if(ub>lb){
-            ccOffset[i+1] = totalCliques + totalSize + 2;
-            neighborSize[i+1] = 2*totalCliques*k + 4*totalSize;
+            ccOffset[i+1] = totalCliques + totalSize + 2 +1 ;
+            neighborSize[i+1] = 2*totalCliques*k + 2*totalSize+1;
 
 
         }
@@ -919,8 +920,13 @@ __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter,
 
 }
 
+__global__ void createFlowNetworkOffset(deviceGraphPointers G, deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, ui *compCounter,ui *upperBound , ui totalWarps, ui totalComponents, ui k, ui lb) {
+    extern __shared__ char sharedMemory[];
+    ui sizeOffset = 0;
 
-__global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter,ui *upperBound, ui *offset,ui *rank, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui lb) {
+    ui *counter = (ui *)(sharedMemory + sizeOffset);
+    
+    
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
@@ -928,65 +934,32 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
     for(ui i = warpId; i < totalComponents; i += totalWarps){
 
         if(upperBound[i]>lb){
-            ui alpha = (upperBound[i]+lb)/2;
-            ui offsetLoc;
+            
             ui start = conComp.componentOffset[i];
             ui end = conComp.componentOffset[i+1];
             ui total = end - start;
-            ui cliqueStart = compCounter[i];
-            ui cliqueEnd = compCounter[i+1];
-            ui totalCliques = cliqueEnd-cliqueStart;
+            ui totalCliques = compCounter[i+1]-compCounter[i];
 
-            ui offset = offset[rank[i]];
+            ui vertexOffset = flowNetwork.offset[i];
+            ui neighborOffset = flowNetwork.neighborOffset1;
 
-            for (ui j = laneId; j < totalCliques; j += warpSize){
-                for(ui x =0; x <k; x++){
-                    ui vertex = cliqueData.finalCliqueData[cliqueStart + x*t+j];
-                    flowNetwork.toEdge[offset + j* k +x ] = vertex;
-                    flowNetwork.capacity[offset + j* k +x ] = k-1;
-                    flowNetwork.flow[offset + j* k +x ] = k-1;
-
-                    ui loc = atomicAdd(&counter[vertex],1);
-                    flowNetwork.toEdge[offset + totalCliques + vertex + loc] = j;
-                    flowNetwork.capacity[offset + totalCliques + vertex + loc] = 1;
-                    flowNetwork.flow[offset + totalCliques + vertex + loc ] = 1;
-                }
+            if(laneId==0){
+                counter[threadIdx.x/32] =0;
             }
+            __syncwarp();
 
             for (ui j = laneId; j < total; j += warpSize){
-                ui vertex = conComp.mapping[offset+j];
-                flowNetwork.toEdge[offset + totalCliques + total + 1] = vertex;
-                flowNetwork.capacity[offset + totalCliques + total + 1] = densestCore.cliqueDegree[vertex];
-                flowNetwork.flow[offset + totalCliques + total + 1] = densestCore.cliqueDegree[vertex];
-
-                ui loc = atomicAdd(&counter[vertex],1);
-                flowNetwork.toEdge[offset + totalCliques + vertex + loc] = total+totalCliques;
-                flowNetwork.capacity[offset + totalCliques + vertex + loc] = 0;
-                flowNetwork.flow[offset + totalCliques + vertex + loc ] = 0;
-
-                flowNetwork.toEdge[offset + totalCliques + total + 2] = vertex;
-                flowNetwork.capacity[offset + totalCliques + total + 1] = 0;
-                flowNetwork.flow[offset + totalCliques + total + 1] = 0;
-
-                loc = atomicAdd(&counter[vertex],1);
-                flowNetwork.toEdge[offset + totalCliques + vertex + loc] = total+totalCliques+1;
-                flowNetwork.capacity[offset + totalCliques + vertex + loc] = alpha*k;
-                flowNetwork.flow[offset + totalCliques + vertex + loc ] = alpha*k;
-
+                ui vertex = conComp.mapping[start+j];
+                flowNetwork.neighborOffset2[neighborOffset+j + 1] = G.cliqueDegree[densestCore.mapping[vertex]] + 1;
             }
-
-            for(ui j = laneId; j < totalCliques + total + 2; j += warpSize){
-                if(j ==0){
-                    flowNetwork.offset[need + j ] =0;
-                } else if(j<totalCliques+1){
-                    flowNetwork.offset[need + j ]  = j*k; 
-
-                } else if(j<totalCliques+total+1){
-                    flowNetwork.offset[need + j ] = totalCliques*k+
-
-                }
-
-                //Need to implement a way to get the offset
+            for (ui j = laneId; j < totalCliques; j += warpSize){
+                flowNetwork.neighborOffset2[neighborOffset+total+j+1] = k;
+            }
+            if(laneId=0){
+                flowNetwork.neighborOffset2[neighborOffset+total+totalCliques+1] = total;
+                flowNetwork.neighborOffset2[neighborOffset+total+totalCliques+2] = 0;
+                flowNetwork.neighborOffset2[0]=0;
+            }
 
 
             }
@@ -994,7 +967,7 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
     }
 
 
-}
+
 
 
 __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter,ui *upperBound, ui *ranks,ui *offset,ui n, ui m, ui totalWarps, int totalComponents, ui k, ui lb) {
