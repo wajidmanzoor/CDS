@@ -161,20 +161,20 @@ void memoryAllocationPrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors, ui
 
 void memoryAllocationFlowNetwork(deviceFlowNetworkPointers &flowNetwork, ui vertexSize, ui neighborSize, ui totalComponents){
 
-    chkerr(cudaMalloc((void**)&(flowNetwork.offset), (1 + totalComponents) * sizeof(ui)));
-    chkerr(cudaMalloc((void**)&(flowNetwork.neighborOffset1), (1 + totalComponents) * sizeof(ui)));
+
     chkerr(cudaMalloc((void**)&(flowNetwork.neighborOffset2), (vertexSize) * sizeof(ui)));
 
     chkerr(cudaMalloc((void**)&(flowNetwork.Edges), neighborSize * sizeof(ui)));
 
-    chkerr(cudaMalloc((void**)&(flowNetwork.capacityForward), neighborSize * sizeof(capacity)));
-    chkerr(cudaMalloc((void**)&(flowNetwork.capacityBackward), neighborSize * sizeof(capacity)));
+    chkerr(cudaMalloc((void**)&(flowNetwork.capacity), neighborSize * sizeof(double)));
 
-    chkerr(cudaMalloc((void**)&(flowNetwork.flowForward), neighborSize* sizeof(capacity)));
-    chkerr(cudaMalloc((void**)&(flowNetwork.flowBackward), neighborSize* sizeof(capacity)));
+    chkerr(cudaMalloc((void**)&(flowNetwork.flow), neighborSize* sizeof(double)));
 
-    chkerr(cudaMalloc((void**)&(flowNetwork.height), (vertexSize-totalComponents)* sizeof(capacity)));
-    chkerr(cudaMalloc((void**)&(flowNetwork.excess), (vertexSize-totalComponents)* sizeof(capacity)));
+    chkerr(cudaMalloc((void**)&(flowNetwork.height), (vertexSize)* sizeof(ui)));
+    chkerr(cudaMemset(flowNetwork.height,0,(vertexSize)* sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(flowNetwork.excess), (vertexSize)* sizeof(double)));
+    chkerr(cudaMemset(flowNetwork.excess, 0, vertexSize * sizeof(double)));
+
     cudaDeviceSynchronize();
 
 }
