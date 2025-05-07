@@ -389,8 +389,8 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
     ui *compCounter;
     chkerr(cudaMalloc((void**)&(compCounter), (totalComponents+1)* sizeof(ui)));
     chkerr(cudaMemset(compCounter, 0, (totalComponents+1) * sizeof(ui)));
-
-    getConnectedComponentStatus<<<BLK_NUMS, BLK_DIM>>>(conComp,cliqueData, densestCore,compCounter,t, tt,k, maxCore,TOTAL_THREAD);
+    
+    <<<BLK_NUMS, BLK_DIM>>>(conComp,cliqueData, densestCore,compCounter,t, tt,k, maxCore,TOTAL_THREAD);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Calculate total cliques for each Component");
 
@@ -414,9 +414,6 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
     cudaFree(cliqueData);
 
 
-
-    //TODO: MIGHT BE BETTER IF I JUST USE ON KERNEL TO DO THIS ALL THRUST STUFF
-
     // Memory allocation for bounds
 
     double* bounds;
@@ -424,9 +421,8 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
     double* upperBound = bounds;
     double* lowerBound = bounds + totalComponents;
 
-    ui *ccoffset, *neighborSize;
     chkerr(cudaMalloc((void**)&flowNetwork.offset,(totalComponents+1)*sizeof(ui)));
-    chkerr(cudaMalloc((void**)&neighborSize,(totalComponents+1)*sizeof(ui)));
+    chkerr(cudaMalloc((void**)&flowNetwork.neighborOffset1,(totalComponents+1)*sizeof(ui)));
     
     thrust::device_ptr<int> d_cliqueCore(deviceGraph.cliqueCore);
     
@@ -436,33 +432,39 @@ void dynamicExact(deviceComponentPointers &conComp,devicePrunedNeighbors &pruned
     
     // Convert to double and return
     double md =  static_cast<double>(max_int);
-
-    getLbUbandSize<<<BLK_NUMS, BLK_DIM>>>( conComp, compCounter, lowerBound, upperBound, ccoffset,  neighborSize, totalComponents, k, md);
+    getLbUbandSize<<<BLK_NUMS, BLK_DIM>>>( conComp, compCounter, lowerBound, upperBound, flowNetwork.offset, flowNetwork.neighborOffset1, totalComponents, k, md);
     CUDA_CHECK_ERROR("Get LB and UB ");
 
     thrust::inclusive_scan(
-        thrust::device_pointer_cast(ccoffset),
-        thrust::device_pointer_cast(ccoffset + totalComponents + 1),
-        thrust::device_pointer_cast(ccoffset));
+        thrust::device_pointer_cast(flowNetwork.offset),
+        thrust::device_pointer_cast(flowNetwork.offset + totalComponents + 1),
+        thrust::device_pointer_cast(flowNetwork.offset));
 
     thrust::inclusive_scan(
-        thrust::device_pointer_cast(neighborSize),
-        thrust::device_pointer_cast(neighborSize + totalComponents + 1),
-        thrust::device_pointer_cast(neighborSize));
+        thrust::device_pointer_cast(flowNetwork.neighborOffset1),
+        thrust::device_pointer_cast(flowNetwork.neighborOffset1 + totalComponents + 1),
+        thrust::device_pointer_cast(flowNetwork.neighborOffset1));
 
-    ui flowVertexCount, flowNeighborCount;
+    ui flownetworkVertexSize, flownetworkNeighborSize;
+    chkerr(cudaMemcpy(&flownetworkVertexSize, flowNetwork.offset+totalComponents, sizeof(ui), cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(&flownetworkNeighborSize, flowNetwork.neighborOffset1+totalComponents, sizeof(ui), cudaMemcpyDeviceToHost));
 
-    chkerr(cudaMemcpy(&flowVertexCount,ccoffset+totalComponents,sizeof(ui),cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(&flowNeighborCount,ccoffset+totalComponents,sizeof(ui),cudaMemcpyDeviceToHost));
-
-    
-
-    memoryAllocationFlowNetwork(flowNetwork, flowVertexCount, flowNeighborCount, totalComponents);
+    memoryAllocationFlowNetwork(flowNetwork, flownetworkVertexSize, flownetworkNeighborSize, totalComponents);
     
     //Create a flow network for each component
-    createFlowNetwork<<<BLK_NUMS, BLK_DIM>>>(flowNetwork, conComp, densestCore, finalCliqueData, compCounter, counter,upperBound, vertexCount,newEdgeCount, TOTAL_WARPS, totalComponents, k, lb);
- 
+    createFlowNetworkOffset<<<BLK_NUMS, BLK_DIM>>>( deviceGraph, flowNetwork, conComp, densestCore, finalCliqueData,   compCounter, upperBound,TOTAL_WARPS, totalComponents, k, just, totaLCliques);
+    CUDA_CHECK_ERROR("Get Flow Network Neighbor offset");
+    thrust::inclusive_scan(
+        thrust::device_pointer_cast(flowNetwork.neighborOffset2),
+        thrust::device_pointer_cast(flowNetwork.neighborOffset2 + flownetworkVertexSize),
+        thrust::device_pointer_cast(flowNetwork.neighborOffset2));
     
+    createFlowNetwork<<<BLK_NUMS, BLK_DIM>>>( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter,upperBound , TOTAL_WARPS, totalComponents, k, just , totaLCliques);
+    CUDA_CHECK_ERROR("Create Flow Network");
+    
+    pushRelabel<<<BLK_NUMS, BLK_DIM>>>( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter,upperBound, TOTAL_WARPS, totalComponents, k, just);
+    CUDA_CHECK_ERROR("Create Flow Network");
+
 
 }
 
