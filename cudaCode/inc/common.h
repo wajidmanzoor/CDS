@@ -129,15 +129,13 @@ typedef struct{
 
 }devicePrunedNeighbors;
 
-typedef struct{ 
-    ui *offset; 
+typedef struct{
+    ui *offset;
     ui *neighborOffset1;
     ui *neighborOffset2;
     ui *Edges; // neighbors
-    double *capacityForward;
-    double *capacityBackward;
-    double *flowForward;
-    double *flowBackward;
+    double *capacity;
+    double *flow;
     ui *height;
     double *excess;
 
