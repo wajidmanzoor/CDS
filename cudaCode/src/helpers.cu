@@ -1090,7 +1090,7 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
  }
 
  
- __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,double *upperBound, ui *activeNodes, ui totalWarps, int totalComponents, ui k, ui partitionSize, double lb) {
+ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,double *upperBound,double *lower_bound, ui *activeNodes, ui *componenetsLeft, ui totalWarps, int totalComponents, ui k, ui partitionSize, int maxIterations) {
     extern __shared__ char sharedMemory[];
     ui sizeOffset = 0;
 
@@ -1108,8 +1108,8 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
 
         double bais = 1.0/(total*(total-1));
 
-        if((upperBound[warpId]-lb)>bais){
-            ui alpha = (upperBound[warpId]+lb)/2;
+        if((upperBound[warpId]-lowerBound[warpId])>bais){
+            double alpha = (upperBound[warpId]+lowerBound[warpId])/2;
             ui offsetLoc;
             ui start = conComp.componentOffset[i];
             ui end = conComp.componentOffset[i+1];
@@ -1230,8 +1230,46 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
         }
 
         __syncwarp();
+
+        for(ui i = idx; i< totalComponents; i+=TOTAL_THREAD){
+            ui fStart = flowNetwork.offset[i];
+            ui fEnd = flowNetwork.offset[i+1];
+
+            ui start = conComp.componentOffset[i];
+            ui end = conComp.componentOffset[i+1];
+            ui total = end - start;
+
+            double bais = 1.0/(total*(total-1));
+            
+
+            ui tFlow = totalCliques +  total + 2;
+
+            ui s = tFlow - 2;
+            ui t = tFlow - 1;
+            double maxFlow = flowNetwork.excess[fStart+t];
+            ui cliqueStart = compCounter[i];
+            ui cliqueEnd = compCounter[i+1];
+            ui totalCliques = cliqueEnd-cliqueStart;
+
+        if(flowNetwork.excess[fStart + t] == (double) totalCliques*k){
+
+            upperBound[warpId] = alpha;
+
+        }else{
+            lowerBound[warpId] = alpha;
+
+
+        }
+        if((upperBound[warpId]-lowerBound[warpId])>bais){
+            atomicAdd(componenetsLeft,1);
+
+        }
+
+
+        }
+
         
-        
+
 
 
     }
