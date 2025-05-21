@@ -1095,8 +1095,8 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
     ui sizeOffset = 0;
 
     ui *counter = (ui *)(sharedMemory + sizeOffset);
-    
-    
+
+
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
@@ -1144,7 +1144,7 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
             }
 
             __syncwarp();
-            int maxIterations = 1;
+            int maxIterations = 2;
             for (int iter = 0; iter < maxIterations; iter++) {
                 if(laneId==0){
                     counter[threadIdx.x / warpSize] = 0;
@@ -1156,7 +1156,6 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
                         if (pos < partitionSize) {
                             activeNodes[warpId * partitionSize + pos] = i;
                         }
-                      printf("warp id %d lane id %d pos %d u %d act %d iter %d \n", warpId,laneId,pos,i,counter[threadIdx.x / warpSize],iter);
 
                     }
                 }
@@ -1164,29 +1163,32 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
                 if (counter[threadIdx.x / warpSize] ==0 ){
                     break;
                 }
-                 for (ui i = laneId; i < activeCount; i+=warpSize){
+                for (ui i = laneId; i < counter[threadIdx.x / warpSize] ; i+=warpSize){
                     ui vertex = activeNodes[warpId * partitionSize + i];
                     bool pushed = false;
                     ui nStart = flowNetwork.neighborOffset2[fStart+ vertex];
                     ui nEnd = flowNetwork.neighborOffset2[fStart+ vertex +1];
                     for(ui j = nStart; j< nEnd; j++){
                         ui neigh = flowNetwork.Edges[nStart + j];
-                        int residual = flowNetwork.capacity[nStart + j ]- flowNetwork.flow[nStart + j ];
+                        double residual = flowNetwork.capacity[nStart + j ]- flowNetwork.flow[nStart + j ];
+
                         __syncwarp();
-                        if((flowNetwork.height[fStart + vertex] == flowNetwork.height[fStart + neigh ] +1 )&&residual > 0){
-                            int delta = min(flowNetwork.excess[fStart + vertex], residual);
+                        if((flowNetwork.height[fStart + vertex] == flowNetwork.height[fStart + neigh ]+1)&&residual > 0){
+
+
+                            double delta = min(flowNetwork.excess[fStart + vertex], residual);
                             if(delta>0){
                                 atomicAdd(&flowNetwork.flow[nStart + j],delta);
                                 ui stemp = flowNetwork.neighborOffset2[fStart+ neigh];
                                 ui etemp = flowNetwork.neighborOffset2[fStart+ neigh+1];
                                 for (ui x = stemp; x< etemp; x++){
                                     if(flowNetwork.Edges[stemp + x] == vertex){
-                                         atomicAdd(&flowNetwork.flow[ntemp + x],-delta);
+                                         atomicAdd(&flowNetwork.flow[stemp + x],-delta);
                                     }
                                 }
 
-                                atmoicAdd(&flowNetwork.excess[fStart + vertex], -delta);
-                                atmoicAdd(&flowNetwork.excess[fStart + neigh],delta);
+                                atomicAdd(&flowNetwork.excess[fStart + vertex], -delta);
+                                atomicAdd(&flowNetwork.excess[fStart + neigh],delta);
                                 pushed = true;
 
                             }
@@ -1196,44 +1198,44 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
 
 
 
+
+
                     }
-                    
-                    __syncwarp();
- 
+                     __syncwarp();
                     if(!pushed && flowNetwork.excess[fStart + vertex] > 0){
                         int minHeight = INF;
                         for(ui j = nStart; j< nEnd; j++){
                             ui neigh = flowNetwork.Edges[nStart + j];
                             int residual = flowNetwork.capacity[nStart + j ]- flowNetwork.flow[nStart + j ];
-                            if(resiual > 0 ){
+                            if(residual > 0 ){
                                 minHeight = min(minHeight, flowNetwork.height[fStart + neigh]);
                             }
 
 
 
                         }
-                        flowNetwork.height[fStart + vertex] = minHeight +1;
+                        if(minHeight!=INF){
+                          flowNetwork.height[fStart + vertex] = minHeight +1;
 
+                        }
+                        
 
                     }
-
-
-                 }
-
-
+                }
 
 
             }
-        
+
 
         }
 
         __syncwarp();
-
-
         
+        
+
+
     }
-}
+    }
 __global__ void edmondsKarp(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter,ui *upperBound, ui *ranks,ui *offset, int *augmentedPaths, ui *BFS, ui apSize, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui lb){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
