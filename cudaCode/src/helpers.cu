@@ -1089,7 +1089,7 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
     }
  }
 
-__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui * compCounter, double * upperBound, double * lowerBound, ui * activeNodes, ui * componenetsLeft,float *densityMax, ui totalWarps, int totalComponents, ui k,ui t, ui partitionSize) {
+__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui * compCounter, double * upperBound, double * lowerBound, ui * activeNodes, ui * componenetsLeft, ui totalWarps, int totalComponents, ui k,ui t, ui partitionSize) {
   extern __shared__ char sharedMemory[];
   ui sizeOffset = 0;
 
