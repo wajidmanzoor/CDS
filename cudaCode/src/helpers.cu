@@ -1303,6 +1303,79 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceCompone
   }
 }
 
+__global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, deviceCliquesPointer finalCliqueData, ui *compCounter,  double * upperBound, double * lowerBound, double *densities,ui totalWarps, int totalComponents, ui k,ui t) {
+
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int warpId = idx / warpSize;
+  int laneId = idx % warpSize;
+
+  for (ui i = warpId; i < totalComponents; i += totalWarps) {
+    ui start = conComp.componentOffset[i];
+    ui end = conComp.componentOffset[i + 1];
+    ui total = end - start;
+    ui cliqueStart = compCounter[i];
+    ui cliqueEnd = compCounter[i + 1];
+    ui totalCliques = cliqueEnd - cliqueStart;
+
+    ui tFlow = total + totalCliques +2;
+
+    double bais = 1.0 / (tFlow * (tFlow - 1));
+
+
+    if (((upperBound[i] - lowerBound[i]) < bais)&&(upperBound[i]!=0)&&(lowerBound[i]!=0)) {
+
+        ui size = 0;
+        ui fStart = flowNetwork.offset[i];
+        for (ui j = 0; j < total; j ++){
+          ui neighborOffset = flowNetwork.neighborOffset2[fStart+total+totalCliques];
+          if(laneId==0)
+            printf("warpId %d lane id %d j %d o %d no %d vertex %d cap %f flow %f \n",warpId, laneId,j, fStart,neighborOffset, flowNetwork.Edges[neighborOffset+j],flowNetwork.capacity[neighborOffset+j],flowNetwork.flow[neighborOffset+j]);
+             
+             double residual = flowNetwork.capacity[neighborOffset+j] - flowNetwork.flow[neighborOffset+j];
+             if(residual >0 ){
+                size++;
+                int vertex = flowNetwork.Edges[neighborOffset+j];
+                for(ui x = laneId; x < totalCliques; x +=warpSize){
+                    ui w = 0;
+                    while(w<k){
+                        if(finalCliqueData.trie[w*t+x + cliqueStart ] == vertex){
+                            atomicAdd(&densities[i],1);
+                        break;
+                        }
+                        w++;
+                    }
+
+                }
+                 __syncwarp();
+             }
+
+        }
+         __syncwarp();
+
+        if(laneId==0){
+            // Total Cliques
+            densities[i]= densities[i]/k;
+
+            //Density
+            if(size==0){
+              densities[i] = lowerBound[i];
+            }else{
+              densities[i]= densities[i]/size;
+            }
+            
+            printf("Warpid %d density %f size %d \n", warpId,densities[i],size);
+
+
+        }
+
+
+  }
+}
+}
+
+
+
+
 /*__global__ void edmondsKarp(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,ui *counter,ui *upperBound, ui *ranks,ui *offset, int *augmentedPaths, ui *BFS, ui apSize, ui n, ui m, ui totalWarps, int totalComponents, ui k, ui lb){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -1398,7 +1471,9 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceCompone
 
     }
 
-}*/
+}
+
+
 
 
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
