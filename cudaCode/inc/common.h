@@ -52,7 +52,7 @@ typedef struct  {
 
     ui *degree;
     ui *cliqueDegree;
-    
+
     int *cliqueCore;
     ui *cliqueCorePeelSequence;
 
@@ -66,10 +66,11 @@ typedef struct  {
 }deviceMotifPointers;
 
 typedef struct  {
+
     ui *componentOffset;
     ui *components;
     ui *mapping;
-    int *reverseMapping;
+    ui *reverseMapping;
 }deviceComponentPointers;
 
 typedef struct  {
@@ -78,7 +79,7 @@ typedef struct  {
     ui *numVertex;
     ui *component;
     ui *status;
-    
+
 }deviceResultpointer;
 
 typedef struct{
@@ -100,13 +101,13 @@ typedef struct {
     ui *candidatesPartition;       // Flattened array of candidate sets
     ui *candidates;       // Flattened array of candidate sets
     ui *offsetPartition;
-    ui *offset; 
-    ui *validNeighMaskPartition;   
-    ui *validNeighMask;       
-    ui *count; 
+    ui *offset;
+    ui *validNeighMaskPartition;
+    ui *validNeighMask;
+    ui *count;
     ui *temp;           // Number of partial cliques at this level
     ui *max;
-}cliqueLevelDataPointer; 
+}cliqueLevelDataPointer;
 
 typedef struct{
     ui *mapping;
@@ -141,6 +142,8 @@ typedef struct{
 
 }deviceFlowNetworkPointers;
 
+
+
 extern  deviceGraphPointers deviceGraph;
 extern  deviceDAGpointer deviceDAG;
 extern  cliqueLevelDataPointer levelData;
@@ -148,8 +151,12 @@ extern  deviceCliquesPointer cliqueData;
 extern  densestCorePointer  densestCore;
 extern  deviceComponentPointers conComp;
 extern devicePrunedNeighbors prunedNeighbors;
-extern deviceFlowNetworkPointers flowNetwork;
 extern  deviceCliquesPointer finalCliqueData;
+
+extern deviceFlowNetworkPointers flowNetwork;
+
+
+
 
 
 

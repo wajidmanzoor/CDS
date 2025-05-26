@@ -16,7 +16,6 @@ void memoryAllocationGraph(deviceGraphPointers &G, Graph &graph) {
 
     chkerr(cudaMalloc((void**)&(G.cliqueDegree), n * sizeof(ui)));
     chkerr(cudaMalloc((void**)&(G.cliqueCore), n * sizeof(int)));
-
     chkerr(cudaMalloc((void**)&(G.cliqueCorePeelSequence), n * sizeof(ui)));
     chkerr(cudaMalloc((void**)&(G.density), n * sizeof(double)));
     chkerr(cudaMalloc((void**)&(G.motifCount), n * sizeof(ui)));
@@ -51,13 +50,19 @@ void memoryAllocationDAG(deviceDAGpointer &D, ui n, ui m) {
     cudaDeviceSynchronize();
 }*/
 
-void memoryAllocationComponent(deviceComponentPointers &C,ui totalComponents, ui n, ui m) {
-    chkerr(cudaMalloc((void**)&(C.componentOffset), (totalComponents + 1) * sizeof(ui)));
-    chkerr(cudaMemset(C.componentOffset, 0, (totalComponents + 1) * sizeof(ui)));
+
+ ui *componentOffset;
+    ui *components;
+    ui *mapping;
+
+void memoryAllocationComponent(deviceComponentPointers &C, ui n, ui m) {
+    chkerr(cudaMalloc((void**)&(C.componentOffset), (n + 1) * sizeof(ui)));
+    chkerr(cudaMemset(C.componentOffset, 0, (n + 1) * sizeof(ui)));
     chkerr(cudaMalloc((void**)&(C.components), n * sizeof(ui)));
     chkerr(cudaMalloc((void**)&(C.mapping), n * sizeof(ui)));
     chkerr(cudaMalloc((void**)&(C.reverseMapping), n * sizeof(ui)))
     cudaDeviceSynchronize();
+
 }
 
 void memoryAllocationresult(deviceResultpointer &R, ui n) {
@@ -109,8 +114,8 @@ ui memoryAllocationlevelData(cliqueLevelDataPointer &L, ui k, ui pSize, ui cpSiz
     cudaDeviceSynchronize();
     return maxBitMask;
 }
-void memoryAllocationDensestCore(densestCorePointer &C, ui n, ui density, ui totalCliques){
 
+void memoryAllocationDensestCore(densestCorePointer &C, ui n, ui density, ui totalCliques){
 
     chkerr(cudaMalloc((void**)&(C.mapping), n* sizeof(ui)));
 
@@ -128,26 +133,16 @@ void memoryAllocationDensestCore(densestCorePointer &C, ui n, ui density, ui tot
     chkerr(cudaMalloc((void**)&(C.n), sizeof(ui)));
     chkerr(cudaMemcpy(C.n, &n, sizeof(ui), cudaMemcpyHostToDevice));
     chkerr(cudaMalloc((void**)&(C.m), sizeof(ui)));
-    
     chkerr(cudaMalloc((void**)&(C.totalCliques), sizeof(ui)));
-    chkerr(cudaMemcpy(C.totalCliques, &totalCliques, sizeof(ui), cudaMemcpyHostToDevice));  
+    chkerr(cudaMemcpy(C.totalCliques, &totalCliques, sizeof(ui), cudaMemcpyHostToDevice));
+
     chkerr(cudaMalloc((void**)&(C.reverseMap), n * sizeof(ui)));
     cudaDeviceSynchronize();
 
-}
 
 
-// Memory deallocation functions
-void freeGraph(deviceGraphPointers &G) {
-    chkerr(cudaFree(G.offset));
-    chkerr(cudaFree(G.neighbors));
-    chkerr(cudaFree(G.degree));
-    chkerr(cudaFree(G.cliqueDegree));
-    chkerr(cudaFree(G.cliqueCore));
-    chkerr(cudaFree(G.cliqueCorePeelSequence));
-    chkerr(cudaFree(G.density));
-    chkerr(cudaFree(G.motifCount));
 }
+
 
 void memoryAllocationPrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors, ui n, ui m){
     chkerr(cudaMalloc((void**)&(prunedNeighbors.newOffset), (n+1) * sizeof(ui)));
@@ -179,17 +174,26 @@ void memoryAllocationFlowNetwork(deviceFlowNetworkPointers &flowNetwork, ui vert
 
 }
 
+// Memory deallocation functions
+void freeGraph(deviceGraphPointers &G) {
+    chkerr(cudaFree(G.offset));
+    chkerr(cudaFree(G.neighbors));
+    chkerr(cudaFree(G.degree));
+    chkerr(cudaFree(G.cliqueDegree));
+    chkerr(cudaFree(G.cliqueCore));
+    chkerr(cudaFree(G.cliqueCorePeelSequence));
+    chkerr(cudaFree(G.density));
+    chkerr(cudaFree(G.motifCount));
+}
+
 /*void freeMotif(deviceMotifPointers &M) {
     chkerr(cudaFree(M.adjacencyMatrix));
 }*/
 
-
 void freeComponents(deviceComponentPointers &C) {
-    chkerr(cudaFree(C.componentTotal));
     chkerr(cudaFree(C.componentOffset));
     chkerr(cudaFree(C.components));
     chkerr(cudaFree(C.mapping));
-
 }
 
 void freeResults(deviceResultpointer &R) {
@@ -229,7 +233,6 @@ void freeLevelData(cliqueLevelDataPointer &L) {
 
 void freeDensestCore(densestCorePointer &C){
     chkerr(cudaFree(C.mapping));
-    chkerr(cudaFree(c.reverseMap));
     chkerr(cudaFree(C.offset));
     chkerr(cudaFree(C.neighbors));
     chkerr(cudaFree(C.density));
@@ -237,7 +240,8 @@ void freeDensestCore(densestCorePointer &C){
     chkerr(cudaFree(C.m));
     chkerr(cudaFree(C.totalCliques));
     chkerr(cudaFree(C.cliqueDegree));
- 
+    //chkerr(cudaFree(C.cliqueCore));
+
 }
 
 void freePrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors){
@@ -246,11 +250,4 @@ void freePrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors){
     chkerr(cudaFree(prunedNeighbors.pruneStatus));
 }
 
-void freeFlowNetwork(deviceFlowNetworkPointers &flowNetwork){
-    chkerr(cudaFree(flowNetwork.toEdge));
-    chkerr(cudaFree(flowNetwork.capacity));
-    chkerr(cudaFree(flowNetwork.flow));
-    cudaDeviceSynchronize();
-
-}
 
