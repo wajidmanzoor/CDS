@@ -1,25 +1,28 @@
 cmake_minimum_required(VERSION 3.10)
-
-# Set the project name
 project(CDS LANGUAGES CXX CUDA)
 
-# Set the CUDA architecture
-set(CMAKE_CUDA_ARCHITECTURES 80 86)
+# A100 uses SM 80
+set(CMAKE_CUDA_ARCHITECTURES 80)
 
-# Add executable
-add_executable(main 
-    src/graph.cpp 
-    src/common.cpp 
-    src/gpuMemoryAllocation.cu 
-    src/helpers.cu 
+# Enable modern CUDA features
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr")
+
+add_executable(main
+    src/graph.cpp
+    src/common.cpp
+    src/gpuMemoryAllocation.cu
+    src/helpers.cu
     main.cu
 )
 
-# Enable extended lambda (if needed)
-target_compile_options(main PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>)
+# Extended lambda and better default stream
+target_compile_options(main PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>
+    $<$<COMPILE_LANGUAGE:CUDA>:--default-stream per-thread>
+)
 
-# Additional include directories (if needed)
 target_include_directories(main PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
-# Link libraries (if needed)
-# target_link_libraries(main PRIVATE some_library)
+# Link CUDA libraries (if needed)
+find_package(CUDAToolkit REQUIRED)
+target_link_libraries(main PRIVATE CUDA::cublas CUDA::cufft CUDA::curand)
