@@ -43,4 +43,5 @@ __global__ void createFlowNetworkOffset(deviceGraphPointers G, deviceFlowNetwork
 
 __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,double *upperBound , ui totalWarps, ui totalComponents, ui k, double lb, ui t);
 
- __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,double *upperBound, ui *activeNodes, ui totalWarps, int totalComponents, ui k, ui partitionSize, int maxIterations, double lb);
+__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui * compCounter, double * upperBound, double * lowerBound, ui * activeNodes, ui * componenetsLeft,ui totalWarps, int totalComponents, ui k, ui t, ui partitionSize);
+
