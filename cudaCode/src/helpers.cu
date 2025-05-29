@@ -516,38 +516,44 @@ __global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cl
 
    __syncwarp();
     for(ui j =laneId; j<tt; j+=warpSize){
-    //printf("warpId %d laneId %u vertex %u check %d t %d \n",warpId,i,v,cliqueData.trie[j],t);
 
         if(cliqueData.status[j] == -1){
 
           bool found = false;
           ui w =0;
           while(w<k){
+              //printf("warpId %d laneId %u vertex %u check %d t %d loc %d \n",warpId,i,v,cliqueData.trie[w*t+j],t, w*t+j);
+
             if(cliqueData.trie[w*t+j] == v){
+              //printf("found warpId %d laneId %u vertex %u check %d t %d \n",warpId,i,v,cliqueData.trie[w*t+j],t);
+
               found = true;
               break;
             }
             w++;
           }
           if(found){
-            //printf("inside warpId %d laneId %u vertex %u check %d \n",warpId,i,v,cliqueData.trie[j]);
+            //printf("after found warpId %d laneId %u vertex %u check %d \n",warpId,i,v,cliqueData.trie[w*t+j]);
 
               for(ui x =0 ;x<k;x++){
 
                   if(x==w) continue;
                   ui u = cliqueData.trie[x*t+j];
-            // printf("inside warpId %d laneId %u vertex %u check %d u %d loc %d \n",warpId,j,v,cliqueData.trie[j],u,x*t+j);
+                    //printf("update warpId %d laneId %u vertex %u check %d u %d loc %d core of u  %d \n",warpId,j,v,cliqueData.trie[w*t+j],u,x*t+j,G.cliqueCore[u]);
 
 
                   int a = atomicSub(&G.cliqueCore[u],1);
+                    //printf("after update warpId %d laneId %u vertex %u check %d u %d loc %d core of u  %d a %d \n",warpId,j,v,cliqueData.trie[w*t+j],u,x*t+j,G.cliqueCore[u],a);
+
+                   if (a <= level) {
+                       atomicMax(&G.cliqueCore[u], level);
+                  }
                   if(a == level+1){
                       ui loc = atomicAdd(&bufTail, 1);
                       glBuffer[loc] = u;
 
                   }
-                  if(a <= level){
-                      atomicAdd(&G.cliqueCore[u], 1);
-                  }
+
                 /* if(G.cliqueCore[u]<0){
                     G.cliqueCore[u] = 0;
                   }*/
@@ -566,6 +572,7 @@ __global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cl
     }
 }
 }
+
 
 __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer cliqueData, ui *bufTails,ui *glBuffers, ui *globalCount, ui glBufferSize, ui n, ui level, ui k, ui t, ui tt){
     __shared__ ui bufTail;
@@ -616,7 +623,7 @@ __global__ void processNodesByBlock(deviceGraphPointers G,deviceCliquesPointer c
 
                 }
                 if(a <= level){
-                    atomicAdd(&G.cliqueCore[u], 1);
+                    atomicMax(&G.cliqueCore[u], level);
                 }
                 if(G.cliqueCore[u]<0){
                   G.cliqueCore[u] = 0;
@@ -665,9 +672,12 @@ __global__ void generateDensestCore(deviceGraphPointers G, densestCorePointer de
             for (int offset = warpSize / 2; offset > 0; offset /= 2) {
                 count += __shfl_down_sync(0xFFFFFFFF, count, offset);
             }
+            __syncwarp();
+
             if(laneId == 0) {
                 densestCore.offset[loc+1] = count;
             }
+            __syncwarp();
 
         }
     }
@@ -866,7 +876,7 @@ __global__ void getConnectedComponentStatus(deviceComponentPointers conComp,devi
 
           for(ui x=0;x<k;x++){
             ui vertex =densestCore.reverseMap[cliqueData.trie[x*t + i]];
-            comp = min(comp,conComp.components[vertex]);
+            comp = min(comp,conComp.components[conComp.reverseMapping[vertex]]);
 
             cliqueData.trie[x*t + i] = vertex;
 
@@ -1326,7 +1336,10 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceCompone
   }
 }
 __global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, deviceCliquesPointer finalCliqueData, ui *compCounter,  double * upperBound, double * lowerBound, double *densities,ui totalWarps, int totalComponents, ui k,ui t) {
+  extern __shared__ char sharedMemory[];
+  ui sizeOffset = 0;
 
+  ui *size = (ui *)(sharedMemory + sizeOffset);
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   int warpId = idx / warpSize;
   int laneId = idx % warpSize;
@@ -1348,48 +1361,54 @@ __global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponent
 
         ui size = 0;
         ui fStart = flowNetwork.offset[i];
-        for (ui j = 0; j < total; j ++){
-          ui neighborOffset = flowNetwork.neighborOffset2[fStart+total+totalCliques];
-          //if(laneId==0)
-            //printf("warpId %d lane id %d j %d o %d no %d vertex %d cap %f flow %f \n",warpId, laneId,j, fStart,neighborOffset, flowNetwork.Edges[neighborOffset+j],flowNetwork.capacity[neighborOffset+j],flowNetwork.flow[neighborOffset+j]);
-             
-             double residual = flowNetwork.capacity[neighborOffset+j] - flowNetwork.flow[neighborOffset+j];
-             __syncwarp();
-             if(residual >0 ){
-                size++;
-                int vertex = flowNetwork.Edges[neighborOffset+j];
-                for(ui x = laneId; x < totalCliques; x +=warpSize){
-                    ui w = 0;
-                    while(w<k){
-                        if(finalCliqueData.trie[w*t+x + cliqueStart ] == vertex){
-                            atomicAdd(&densities[i],1);
-                        break;
-                        }
-                        w++;
-                    }
+        ui neighborOffset = flowNetwork.neighborOffset2[fStart+total+totalCliques];
 
-                }
-                 __syncwarp();
-             }
+        if(laneId==0){
+            size[threadIdx.x/warpSize] =0;
+        }
+         __syncwarp();
+        
+        for(ui i = laneId; i < total; i +=warpSize){
+            double residual = flowNetwork.capacity[neighborOffset+ j] - flowNetwork.flow[neighborOffset+j];
+            if(residual>0){
+                atomicAdd(&size[threadIdx.x/warpSize],1);
+            }
 
         }
          __syncwarp();
 
-        if(laneId==0){
-            // Total Cliques
-            densities[i]= densities[i]/k;
 
-            //Density
-            if(size==0){
-              densities[i] = lowerBound[i];
-            }else{
-              densities[i]= densities[i]/size;
+
+        for(ui i = laneId; i < totalCliques; i +=warpSize){
+            ui w =0;
+            ui found = true;
+            while(w<k){
+                ui vertex = finalCliqueData.trie[w*t+i + cliqueStart ] 
+                double residual = flowNetwork.capacity[neighborOffset+ vertex] - flowNetwork.flow[neighborOffset+vertex];
+                if(residual <= 0 ){
+                    found = false;
+                    break;
+                }
             }
-            
-            //printf("Warpid %d density %f size %d \n", warpId,densities[i],size);
 
+            if(found){
+                atomicAdd(& densities[i],1);
+
+            }
 
         }
+         __syncwarp();
+        if(laneId==0){
+            //Density
+            if(size[threadIdx.x/warpSize]==0){
+              densities[i] = lowerBound[i];
+            }else{
+              densities[i]= densities[i]/size[threadIdx.x/warpSize];
+            }
+        
+
+        }
+         __syncwarp();
 
 
   }
