@@ -112,7 +112,10 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
 
     size_t sharedMemoryIntialClique =  WARPS_EACH_BLK * sizeof(ui);
     listIntialCliques<<<BLK_NUMS, BLK_DIM,sharedMemoryIntialClique>>>(deviceDAG, levelData, labels, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, level, TOTAL_WARPS);
+    cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Generate Intial Partial Cliques");
+
+
 
     ui partialSize = TOTAL_WARPS * pSize;
     //ui candidateSize = TOTAL_WARPS * cpSize;
@@ -123,6 +126,7 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
 
     createLevelDataOffset(levelData, offsetPartitionSize, TOTAL_WARPS);
     flushParitions<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, pSize,cpSize,k, maxBitMask, level, TOTAL_WARPS);
+    cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Flush Partition data structure");
 
     iterK--;
@@ -139,6 +143,8 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
       chkerr(cudaMemset(levelData.offsetPartition, 0,  (offsetSize)* sizeof(ui)));
       chkerr(cudaMemset(levelData.validNeighMaskPartition,0, (partialSize * maxBitMask) * sizeof(ui)));
       listMidCliques<<<BLK_NUMS, BLK_DIM,sharedMemoryMid>>>(deviceDAG, levelData, labels, k, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, totalTasks, level, TOTAL_WARPS);
+      cudaDeviceSynchronize();
+      
       CUDA_CHECK_ERROR("Generate Mid Partial Cliques");
 
 
@@ -147,6 +153,8 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
       chkerr(cudaMemset(levelData.offset,0,offsetSize*sizeof(ui)));
       chkerr(cudaMemset(levelData.validNeighMask,0,partialSize*maxBitMask*sizeof(ui)));
       flushParitions<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, pSize,cpSize,k, maxBitMask, level, TOTAL_WARPS);
+    cudaDeviceSynchronize();
+
       CUDA_CHECK_ERROR("Flush Partition data structure");
 
       
@@ -172,13 +180,15 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
     chkerr(cudaMemset(cliqueData.trie, 0, t * k * sizeof(ui)));
     if(iterK == 2) {
         writeFinalCliques<<<BLK_NUMS, BLK_DIM,sharedMemoryFinal>>>(deviceGraph, deviceDAG, levelData, cliqueData, totalCliques, k, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, t,totalTasks, level, TOTAL_WARPS);
+        cudaDeviceSynchronize();
         CUDA_CHECK_ERROR("Generate Full Cliques");
+
     }
 
     if(DEBUG){
-        int *h_cliques,*status;
-        h_cliques = new int[t*k];
-        status = new int[t];
+        ui *h_cliques,*status;
+        h_cliques = new ui[t*k];
+        status = new ui[t];
         chkerr(cudaMemcpy(h_cliques, cliqueData.trie, k * t * sizeof(ui), cudaMemcpyDeviceToHost));
         chkerr(cudaMemcpy(status, cliqueData.status, t * sizeof(ui), cudaMemcpyDeviceToHost));
         cout<<endl;
@@ -270,6 +280,8 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
         // Select nodes whoes current degree is level, that means they should be removed as part of the level core
         selectNodes<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, bufTails, glBuffers, glBufferSize, graph.n, level);
         cudaDeviceSynchronize();
+        CUDA_CHECK_ERROR("Select Node Core Decompose");
+
 
         //Total number of verticies in buffer
         thrust::device_vector<ui> dev_vec1(bufTails, bufTails + BLK_NUMS);
@@ -279,6 +291,8 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
 
         processNodesByWarp<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, t, tt);
         cudaDeviceSynchronize();
+        CUDA_CHECK_ERROR("Process Node Core Decompose");
+
 
         chkerr(cudaMemcpy(&count, globalCount, sizeof(unsigned int), cudaMemcpyDeviceToHost));
 
@@ -319,45 +333,58 @@ ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, dens
 
     generateDensestCore<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,densestCore,globalCount,graph.n,lowerBoundDensity,TOTAL_WARPS);
     cudaDeviceSynchronize();
+        CUDA_CHECK_ERROR("Generate Densest Core");
 
-    ui *h_offset;
-    h_offset = new ui[coreSize+1];
 
-    chkerr(cudaMemcpy(h_offset, densestCore.offset, (coreSize+1) * sizeof(ui), cudaMemcpyDeviceToHost));
+    if(DEBUG){
+        ui *h_offset;
+        h_offset = new ui[coreSize+1];
 
-     cout<<endl<<"offset b ";
-    for(int i=0;i<=coreSize;i++){
-      cout<<h_offset[i]<<" ";
+        chkerr(cudaMemcpy(h_offset, densestCore.offset, (coreSize+1) * sizeof(ui), cudaMemcpyDeviceToHost));
+
+        cout<<endl<<"offset b ";
+        for(int i=0;i<=coreSize;i++){
+        cout<<h_offset[i]<<" ";
+        }
+        cout<<endl;
+
     }
-    cout<<endl;
+    
 
 
 
     thrust::inclusive_scan(thrust::device_ptr<ui>(densestCore.offset), thrust::device_ptr<ui>(densestCore.offset + coreSize + 1), thrust::device_ptr<ui>(densestCore.offset));
 
     //debug
-    ui *h_mapping;
-    h_mapping = new ui[coreSize];
-    chkerr(cudaMemcpy(h_mapping, densestCore.mapping, coreSize * sizeof(ui), cudaMemcpyDeviceToHost));
-    chkerr(cudaMemcpy(h_offset, densestCore.offset, (coreSize+1) * sizeof(ui), cudaMemcpyDeviceToHost));
+    if(DEBUG){
+        ui *h_mapping;
+        h_mapping = new ui[coreSize];
+        ui *h_offset;
+        h_offset = new ui[coreSize+1];
+        chkerr(cudaMemcpy(h_mapping, densestCore.mapping, coreSize * sizeof(ui), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(h_offset, densestCore.offset, (coreSize+1) * sizeof(ui), cudaMemcpyDeviceToHost));
 
 
-    cout<<endl<<"Densest core data "<<endl;
-    cout<<endl<<"mapping ";
-    for(int i=0;i<coreSize;i++){
-      cout<<h_mapping[i]<<" ";
+        
+        cout<<endl<<"Densest core data "<<endl;
+        cout<<endl<<"mapping ";
+        for(int i=0;i<coreSize;i++){
+        cout<<h_mapping[i]<<" ";
+        }
+        cout<<endl<<"offset ";
+        for(int i=0;i<=coreSize;i++){
+        cout<<h_offset[i]<<" ";
+        }
+        cout<<endl;
+
     }
-    cout<<endl<<"offset ";
-    for(int i=0;i<=coreSize;i++){
-      cout<<h_offset[i]<<" ";
-    }
-    cout<<endl;
+    
 
 
     ui edgeCountCore;
     chkerr(cudaMemcpy(&edgeCountCore, densestCore.offset+coreSize , sizeof(ui), cudaMemcpyDeviceToHost));
 
-    cout<<"edgeCountCore "<<edgeCountCore<<endl;
+    //cout<<"edgeCountCore "<<edgeCountCore<<endl;
 
     chkerr(cudaMemcpy(densestCore.m,&edgeCountCore, sizeof(ui), cudaMemcpyHostToDevice));
     chkerr(cudaMalloc((void**)&(densestCore.neighbors), edgeCountCore * sizeof(ui)));
@@ -372,23 +399,29 @@ ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, dens
     thrust::scatter(d_indices.begin(), d_indices.end(), d_vertex_map_ptr, d_reverse_map_ptr);
 
 
-    cout<<"gaph size "<<graph.n<<" core size "<<coreSize<<endl;
+    //cout<<"gaph size "<<graph.n<<" core size "<<coreSize<<endl;
 
 
     size_t sharedMemoryGenNeighCore =  WARPS_EACH_BLK * sizeof(ui);
     generateNeighborDensestCore<<<BLK_NUMS, BLK_DIM,sharedMemoryGenNeighCore>>>(deviceGraph,densestCore,lowerBoundDensity,TOTAL_WARPS);
     cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Generate Densest Core neighbors");
+
 
     //Debug
-    ui *h_neighbors;
-    h_neighbors = new ui[edgeCountCore];
-    chkerr(cudaMemcpy(h_neighbors, densestCore.neighbors, edgeCountCore * sizeof(ui), cudaMemcpyDeviceToHost));
+    if(DEBUG){
+        ui *h_neighbors;
+        h_neighbors = new ui[edgeCountCore];
+        chkerr(cudaMemcpy(h_neighbors, densestCore.neighbors, edgeCountCore * sizeof(ui), cudaMemcpyDeviceToHost));
 
-    cout<<endl<<"neighbors ";
-    for(int i=0;i<edgeCountCore;i++){
-      cout<<h_neighbors[i]<<" ";
+        cout<<endl<<"neighbors ";
+        for(int i=0;i<edgeCountCore;i++){
+        cout<<h_neighbors[i]<<" ";
+        }
+        cout<<endl;
+
     }
-    cout<<endl;
+
 
 
     return edgeCountCore;
@@ -496,59 +529,94 @@ int componentDecompose(deviceComponentPointers &conComp,devicePrunedNeighbors &p
 
       chkerr(cudaMemcpy(&hostChanged,changed , sizeof(ui), cudaMemcpyDeviceToHost));
 
+
     }while(hostChanged>0);
 
-    // unique component
-    thrust::device_vector<int> uniqueComponents(vertexCount);
-    auto new_end = thrust::unique_copy(components , components + vertexCount,
-                                   uniqueComponents.begin());
-    int totalComponents = new_end - uniqueComponents.begin();
+    if(DEBUG){
+        ui *h_components;
+        h_components = new ui[vertexCount];
 
-    //Create component offset
+        chkerr(cudaMemcpy(h_components, conComp.components, vertexCount * sizeof(ui), cudaMemcpyDeviceToHost));
+        cout<<"comp 2 ";
+        for(ui i=0;i<vertexCount;i++){
+        cout<<h_components[i]<<" ";
+        }cout<<endl;
+
+    }
+
+    thrust::device_vector<ui> sorted_components(vertexCount);
+    thrust::copy(components, components + vertexCount, sorted_components.begin());
+    thrust::sort(sorted_components.begin(), sorted_components.end());
+
+    // 2. Get truly unique components (now properly handles non-contiguous duplicates)
+    auto unique_end = thrust::unique(sorted_components.begin(), sorted_components.end());
+    int totalComponents = unique_end - sorted_components.begin();
+    cout << "Unique components: " << totalComponents << endl;
+
+    // 3. Create component offset array
     thrust::device_ptr<ui> componentOffsets(conComp.componentOffset);
-    thrust::lower_bound(components , components + vertexCount,
-                    uniqueComponents.begin(), uniqueComponents.begin() + totalComponents,
-                    componentOffsets);
-    componentOffsets[totalComponents] = vertexCount;
 
-    uniqueComponents.resize(totalComponents);
-
-
-    thrust::sort(uniqueComponents.begin(), uniqueComponents.end());
-
+    // Need to sort the original components for lower_bound to work correctly
+    thrust::device_vector<ui> temp_sorted(vertexCount);
+    thrust::copy(components, components + vertexCount, temp_sorted.begin());
+    thrust::sort(temp_sorted.begin(), temp_sorted.end());
 
     thrust::lower_bound(
-        uniqueComponents.begin(), uniqueComponents.end(),
+        temp_sorted.begin(), temp_sorted.end(),
+        sorted_components.begin(), unique_end,
+        componentOffsets
+    );
+    componentOffsets[totalComponents] = vertexCount;
+
+    // 4. Renumber components to be contiguous (0,1,2,...)
+    thrust::lower_bound(
+        sorted_components.begin(), unique_end,
         components, components + vertexCount,
         components // In-place remap
     );
 
-    //Vertices in Densest Core, use mapping to get actual verticies
-    thrust::device_ptr<ui> vertices(densestCore.mapping);
-
-    thrust::sequence(thrust::device_pointer_cast(conComp.mapping), thrust::device_pointer_cast(conComp.mapping + vertexCount));
+    // 5. Create and sort mapping array
+    thrust::sequence(thrust::device_pointer_cast(conComp.mapping), 
+                    thrust::device_pointer_cast(conComp.mapping + vertexCount));
 
     thrust::sort_by_key(
-      components,
-      components + vertexCount,
-      thrust::device_pointer_cast(conComp.mapping)
+        components,
+        components + vertexCount,
+        thrust::device_pointer_cast(conComp.mapping)
     );
-    //TODO : new neighbor list, new neighbor offset
 
-     return totalComponents;
+    if(DEBUG){
+        ui *h_components;
+        h_components = new ui[vertexCount];
+        ui *h_componentOffsets;
+        h_componentOffsets = new ui[totalComponents+1];
+        chkerr(cudaMemcpy(h_componentOffsets, conComp.componentOffset, (totalComponents+1) * sizeof(ui), cudaMemcpyDeviceToHost));
+        cout<<endl<<"Component Data "<<endl;
+        cout<<"c off ";
+        for(ui i=0;i<totalComponents+1;i++){
+        cout<<h_componentOffsets[i]<<" ";
+        }cout<<endl;
+        chkerr(cudaMemcpy(h_components, conComp.components, vertexCount * sizeof(ui), cudaMemcpyDeviceToHost));
+        cout<<"comp ";
+        for(ui i=0;i<vertexCount;i++){
+        cout<<h_components[i]<<" ";
+        }cout<<endl;
+
+        ui *h_indicies;
+        h_indicies = new ui[vertexCount];
+        chkerr(cudaMemcpy(h_indicies, conComp.mapping, vertexCount * sizeof(ui), cudaMemcpyDeviceToHost));
+        for(ui i=0;i<vertexCount;i++){
+        cout<<h_indicies[i]<<" ";
+        }cout<<endl;
+
+    }
+    
+    return totalComponents;
 
 }
 
-
-
-
-
-
-
-
-
 int main(int argc, const char * argv[]) {
-    if (argc != 8) {
+    if (argc != 9) {
         cout << "Server wrong input parameters!" << endl;
         exit(1);
     }
@@ -560,6 +628,7 @@ int main(int argc, const char * argv[]) {
     ui cpSize = atoi(argv[5]);
     ui glBufferSize = atoi(argv[6]);
     ui partitionSize = atoi(argv[7]);
+    ui t = atoi(argv[8]);
 
     if(DEBUG){
         cout << "filepath: " << filepath << endl;
@@ -569,7 +638,7 @@ int main(int argc, const char * argv[]) {
         cout << "cpSize: " << cpSize << endl;
     }
     //find a way to do this
-    ui t = 10;
+    
     
     Graph graph = Graph(filepath);
 
@@ -699,7 +768,10 @@ int main(int argc, const char * argv[]) {
     chkerr(cudaMalloc((void**)&(counter), totalComponents* sizeof(ui)));
     chkerr(cudaMemset(counter, 0, totalComponents * sizeof(ui)));
     rearrangeCliqueData<<<BLK_NUMS, BLK_DIM>>>(conComp, cliqueData,  finalCliqueData, densestCore, compCounter, counter, t,  tt,  k, totaLCliques,TOTAL_THREAD);
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Rearragne CLique Data");
 
+    
     if(DEBUG){
         int *h_cliques,*status;
         h_cliques = new int[t*k];
@@ -742,7 +814,10 @@ int main(int argc, const char * argv[]) {
     double md =  static_cast<double>(max_int);
 
     getLbUbandSize<<<BLK_NUMS, BLK_DIM>>>( conComp, compCounter, lowerBound, upperBound, flowNetwork.offset, flowNetwork.neighborOffset1, totalComponents, k, md);
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Get UB LU and Size");
 
+    
     thrust::inclusive_scan(
         thrust::device_pointer_cast(flowNetwork.offset),
         thrust::device_pointer_cast(flowNetwork.offset + totalComponents + 1),
@@ -806,6 +881,9 @@ int main(int argc, const char * argv[]) {
     //double just  = 1.0;
 
     createFlowNetworkOffset<<<BLK_NUMS, BLK_DIM>>>( deviceGraph, flowNetwork, conComp, densestCore, finalCliqueData,   compCounter, upperBound,TOTAL_WARPS, totalComponents, k, max_lowerBound, totaLCliques);
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Create Flow Network Offset");
+
 
 
     thrust::inclusive_scan(
@@ -827,6 +905,8 @@ int main(int argc, const char * argv[]) {
     }
     createFlowNetwork<<<BLK_NUMS, BLK_DIM>>>( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter,upperBound , TOTAL_WARPS, totalComponents, k, max_lowerBound , totaLCliques);
     cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Create Flow Network");
+
 
     if(DEBUG){
 
@@ -876,7 +956,7 @@ int main(int argc, const char * argv[]) {
     cudaMalloc((void**)&activeNodes, partitionSize*TOTAL_WARPS * sizeof(ui));
     chkerr(cudaMemset(flowNetwork.flow,0,(flownetworkNeighborSize)* sizeof(double)));
 
-    size_t sharedMemorySize=  WARPS_EACH_BLK * sizeof(ui)+ WARPS_EACH_BLK *sizeof(ui);
+    size_t sharedMemorySize=  WARPS_EACH_BLK * sizeof(ui);
     ui *componenetsLeft;
     ui left = 1;
 
@@ -895,14 +975,66 @@ int main(int argc, const char * argv[]) {
       chkerr(cudaMemset(componenetsLeft,0,sizeof(ui)));
       pushRelabel<<<BLK_NUMS, BLK_DIM,sharedMemorySize>>>( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter,upperBound,lowerBound, activeNodes,componenetsLeft,TOTAL_WARPS, totalComponents, k,totaLCliques, partitionSize);
       cudaDeviceSynchronize();
+      CUDA_CHECK_ERROR("Push Relabel");
+
       cudaMemcpy(&left,componenetsLeft,sizeof(ui),cudaMemcpyDeviceToHost);
       
       getResult<<<BLK_NUMS, BLK_DIM,sharedMemorySize>>>( flowNetwork,  conComp,  finalCliqueData, compCounter, upperBound, lowerBound, densities, TOTAL_WARPS, totalComponents, k, t);
       cudaDeviceSynchronize();
+      CUDA_CHECK_ERROR("Gather Results");
+
       chkerr(cudaMemset(flowNetwork.flow,0,(flownetworkNeighborSize)* sizeof(double)));
 
 
     }
+    if(DEBUG){
+
+        ui *neigh_s;
+        neigh_s = new ui[flownetworkNeighborSize];
+
+        chkerr(cudaMemcpy(neigh_s,flowNetwork.Edges,(flownetworkNeighborSize)*sizeof(ui),cudaMemcpyDeviceToHost));
+
+        cout<<"neighbor ";
+        for(ui i=0;i<(flownetworkNeighborSize);i++){
+        cout<<neigh_s[i]<<" ";
+        }
+        cout<<endl;
+        double *f_capacity;
+
+        f_capacity =  new double[flownetworkNeighborSize];
+
+
+        chkerr(cudaMemcpy(f_capacity,flowNetwork.capacity,(flownetworkNeighborSize)*sizeof(double),cudaMemcpyDeviceToHost));
+
+        cout<<"Capacity ";
+        for(ui i=0; i<flownetworkNeighborSize; i++){
+        cout<<f_capacity[i]<<" ";
+        }
+        cout<<endl;
+
+        ui *height;
+        double *excess;
+        height = new ui[flownetworkVertexSize];
+        excess = new double[flownetworkVertexSize];
+
+        chkerr(cudaMemcpy(height,flowNetwork.height, flownetworkVertexSize*sizeof(ui),cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(excess,flowNetwork.excess, flownetworkVertexSize*sizeof(double),cudaMemcpyDeviceToHost));
+
+        for(ui i =0;i <flownetworkVertexSize; i++){
+        cout<<height[i]<<" ";
+        }cout<<endl;
+
+        for(ui i =0; i<flownetworkVertexSize; i++){
+        cout<<excess[i]<<" ";
+        }cout<<endl;
+
+    }
+
+
+    thrust::device_ptr<double> dev_densities(densities);
+    double max_density = *thrust::max_element(dev_densities, dev_densities + totalComponents);
+
+    std::cout << "Max density: " << max_density << std::endl;
 
     cudaDeviceSynchronize();
 
