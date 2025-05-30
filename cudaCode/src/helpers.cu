@@ -16,7 +16,6 @@ __device__ double fact(ui k){
     return res;
 }
 
-
 __global__ void generateDegreeDAG(deviceGraphPointers G, deviceDAGpointer D, ui *listingOrder, ui n, ui m, ui totalWarps) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
@@ -221,7 +220,6 @@ __global__ void flushParitions(deviceDAGpointer D, cliqueLevelDataPointer levelD
     }
 
 }
-
 
 __global__ void listMidCliques(deviceDAGpointer D, cliqueLevelDataPointer levelData, ui *label, ui k,ui iterK, ui n, ui m,ui pSize, ui cpSize, ui maxBitMask,ui totalTasks, ui level, ui totalWarps){
 
@@ -1359,7 +1357,6 @@ __global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponent
 
     if (((upperBound[i] - lowerBound[i]) < bais)&&(upperBound[i]!=0)&&(lowerBound[i]!=0)) {
 
-        ui size = 0;
         ui fStart = flowNetwork.offset[i];
         ui neighborOffset = flowNetwork.neighborOffset2[fStart+total+totalCliques];
 
@@ -1368,7 +1365,7 @@ __global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponent
         }
          __syncwarp();
         
-        for(ui i = laneId; i < total; i +=warpSize){
+        for(ui j = laneId; j < total; j+=warpSize){
             double residual = flowNetwork.capacity[neighborOffset+ j] - flowNetwork.flow[neighborOffset+j];
             if(residual>0){
                 atomicAdd(&size[threadIdx.x/warpSize],1);
@@ -1379,11 +1376,11 @@ __global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponent
 
 
 
-        for(ui i = laneId; i < totalCliques; i +=warpSize){
+        for(ui j = laneId; j < totalCliques; j +=warpSize){
             ui w =0;
             ui found = true;
             while(w<k){
-                ui vertex = finalCliqueData.trie[w*t+i + cliqueStart ] 
+                ui vertex = finalCliqueData.trie[w*t+j + cliqueStart ];
                 double residual = flowNetwork.capacity[neighborOffset+ vertex] - flowNetwork.flow[neighborOffset+vertex];
                 if(residual <= 0 ){
                     found = false;
