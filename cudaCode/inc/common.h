@@ -96,17 +96,17 @@ typedef struct {
 }deviceCliquesPointer;
 
 typedef struct {
-    ui *partialCliquesPartition;
-    ui  *partialCliques;         // Flattened array of partial cliques
-    ui *candidatesPartition;       // Flattened array of candidate sets
-    ui *candidates;       // Flattened array of candidate sets
-    ui *offsetPartition;
-    ui *offset;
-    ui *validNeighMaskPartition;
-    ui *validNeighMask;
-    ui *count;
-    ui *temp;           // Number of partial cliques at this level
-    ui *max;
+    ui *partialCliquesPartition;   // Virtual Partition  array to store partial cliques. each earp writes in its partition
+    ui  *partialCliques;          // cliques from above are written in continues memeory here.
+    ui *candidatesPartition;     // Virtual partition array that stores candidates of each partial clique from partialCliquesPartition
+    ui *candidates;             // Stores Candidates of each partial clique in partialCliques. 
+    ui *offsetPartition;            // Stores offset of candidates of each PC in partialCliquesPartition.
+    ui *offset;                    // Stores offset of candidates of each PC in partialCliques.
+    ui *validNeighMaskPartition;   // Stores mask of valid neighbors of candidates of each clique in partialCliquesPartition. Bitwise mask that can be used to get its neighbors from neighbor array of DAG
+    ui *validNeighMask;            // Same as above but for partialCliques.
+    ui *count;                     // Number of partial cliques in each partiton.
+    ui *temp;                      // Use for offset calculation. Stores total candidates in each Warp.
+    ui *max;                       // max degree in DAG. 
 }cliqueLevelDataPointer;
 
 typedef struct{
