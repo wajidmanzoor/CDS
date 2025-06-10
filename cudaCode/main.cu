@@ -15,7 +15,7 @@
 #include <cub/cub.cuh>
 
 
-bool DEBUG = true;
+bool DEBUG = false;
 
 __global__ void printmap(densestCorePointer densestCore, ui coreSize){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -25,6 +25,8 @@ __global__ void printmap(densestCorePointer densestCore, ui coreSize){
 }
 
 void generateDAG(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGpointer& deviceDAG , vector<ui> listingOrder){
+
+    // Stores the Directed Acyclic Graph
     memoryAllocationDAG(deviceDAG, graph.n, graph.m);
 
 
@@ -41,7 +43,7 @@ void generateDAG(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGpo
     chkerr(cudaMemset(deviceDAG.offset, 0, sizeof(ui)));
     chkerr(cudaMemcpy(deviceDAG.offset + 1, deviceDAG.degree, (graph.n) * sizeof(ui), cudaMemcpyDeviceToDevice));
 
-    // cummulative sum offset
+    // cummulative sum to get the offset of neighbors
     thrust::inclusive_scan(thrust::device_ptr<ui>(deviceDAG.offset), thrust::device_ptr<ui>(deviceDAG.offset + graph.n + 1), thrust::device_ptr<ui>(deviceDAG.offset));
 
 
@@ -67,7 +69,7 @@ void generateDAG(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGpo
     }
     
 
-    // Write neighbors of DAG
+    // Writes neighbors of DAG based on the offset
     size_t sharedMemoryGenDagNeig =  WARPS_EACH_BLK * sizeof(ui);
     generateNeighborDAG<<<BLK_NUMS, BLK_DIM,sharedMemoryGenDagNeig>>>(deviceGraph, deviceDAG, listOrder, graph.n, graph.m, TOTAL_WARPS);
     cudaDeviceSynchronize();
@@ -94,14 +96,27 @@ void generateDAG(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGpo
 }
 
 ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGpointer& deviceDAG,cliqueLevelDataPointer levelData, ui k, ui pSize,ui  cpSize, ui t){
+    /* Listing all k cliques of a graph using Bron–Kerbosch Algorithm.
+    */
+
+    // Get max out degree in DAG.
     thrust::device_ptr<ui> dev_degree(deviceDAG.degree);
     auto max_iter = thrust::max_element(dev_degree, dev_degree + graph.n);
     int maxDegree = *max_iter;
+
+    // Allocates memory for intermediate results of the clique listing algorithm,
+    // including partial cliques, candidate extensions for each partial clique,
+    // and valid neighbors of each candidate.
+    // Instead of storing actual valid neighbors, a bitmask is used to represent valid neighbors.
+    // The maximum degree determines how many locations are needed, with each location storing a 32-bit mask for up to 32 neighbors.
+
     ui maxBitMask = memoryAllocationlevelData(levelData, k, pSize, cpSize, maxDegree, TOTAL_WARPS);
+
 
     int level = 0;
     int iterK = k;
 
+    // labels used to avoid duplicates. 
     ui *labels;
     chkerr(cudaMalloc((void**)&(labels), (graph.n * TOTAL_WARPS) * sizeof(ui)));
     thrust::device_ptr<ui> dev_labels(labels);
@@ -111,6 +126,9 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
     chkerr(cudaMemset(levelData.partialCliquesPartition, 0,  (TOTAL_WARPS * pSize)* sizeof(ui)));
 
     size_t sharedMemoryIntialClique =  WARPS_EACH_BLK * sizeof(ui);
+    
+    // Generates initial partial cliques, their candidate extensions, and valid neighbor masks.
+    // The data is stored in virtual partitions, with each warp writing to a separate partition.
     listIntialCliques<<<BLK_NUMS, BLK_DIM,sharedMemoryIntialClique>>>(deviceDAG, levelData, labels, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, level, TOTAL_WARPS);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Generate Intial Partial Cliques");
@@ -118,13 +136,14 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
 
 
     ui partialSize = TOTAL_WARPS * pSize;
-    //ui candidateSize = TOTAL_WARPS * cpSize;
     ui offsetSize = ((pSize / (k - 1)) + 1) * TOTAL_WARPS;
-
-
     ui offsetPartitionSize = ((pSize / (k-1)) + 1);
-
+    
+    // Used to compute offsets so that partial cliques, candidates, and valid neighbors 
+    // can be copied from virtual partition to  contiguous array.
     createLevelDataOffset(levelData, offsetPartitionSize, TOTAL_WARPS);
+    
+    // write partial cliques, candidates and valid neighbor bitmask from virtual partition to single arrays.
     flushParitions<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, pSize,cpSize,k, maxBitMask, level, TOTAL_WARPS);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Flush Partition data structure");
@@ -132,32 +151,40 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
     iterK--;
     level++;
 
+    // Total number of partial cliques (tasks) for next level.
     int totalTasks;
     chkerr(cudaMemcpy(&totalTasks, levelData.count + TOTAL_WARPS, sizeof(ui), cudaMemcpyDeviceToHost));
     size_t sharedMemoryMid =  WARPS_EACH_BLK * sizeof(ui);
+
     while(iterK > 2) {
+        
       thrust::device_ptr<ui> dev_labels(labels);
       thrust::fill(dev_labels, dev_labels + graph.n*TOTAL_WARPS, iterK);
+
       chkerr(cudaMemset(levelData.count, 0, (TOTAL_WARPS + 1) * sizeof(ui)));
       chkerr(cudaMemset(levelData.temp, 0, (TOTAL_WARPS + 1) * sizeof(ui)));
       chkerr(cudaMemset(levelData.offsetPartition, 0,  (offsetSize)* sizeof(ui)));
       chkerr(cudaMemset(levelData.validNeighMaskPartition,0, (partialSize * maxBitMask) * sizeof(ui)));
+
+      // Add verticies to partial cliques from initial kernel. 
       listMidCliques<<<BLK_NUMS, BLK_DIM,sharedMemoryMid>>>(deviceDAG, levelData, labels, k, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, totalTasks, level, TOTAL_WARPS);
       cudaDeviceSynchronize();
       
       CUDA_CHECK_ERROR("Generate Mid Partial Cliques");
 
-
+     // Used to compute offsets so that partial cliques, candidates, and valid neighbors 
+     // can be copied from virtual partition to  contiguous array.
       createLevelDataOffset(levelData, offsetPartitionSize, TOTAL_WARPS);
 
       chkerr(cudaMemset(levelData.offset,0,offsetSize*sizeof(ui)));
       chkerr(cudaMemset(levelData.validNeighMask,0,partialSize*maxBitMask*sizeof(ui)));
+      
+      // write partial cliques, candidates and valid neighbor bitmask from virtual partition to single arrays.
       flushParitions<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, pSize,cpSize,k, maxBitMask, level, TOTAL_WARPS);
-    cudaDeviceSynchronize();
-
+      cudaDeviceSynchronize();
       CUDA_CHECK_ERROR("Flush Partition data structure");
 
-      
+      // Get total partial cliques (tasks) for next level. 
       chkerr(cudaMemcpy(&totalTasks, levelData.count + TOTAL_WARPS, sizeof(ui), cudaMemcpyDeviceToHost));
 
       iterK--;
@@ -166,19 +193,25 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
 
 
     chkerr(cudaFree(labels));
-    memoryAllocationTrie(cliqueData, t, k);
-    ui *totalCliques;
 
+    // Stores Final k-cliques of the graph.
+    memoryAllocationTrie(cliqueData, t, k);
+
+    // Used to get next memory location to write a clique
+    ui *totalCliques;
     chkerr(cudaMalloc((void**)&totalCliques, sizeof(ui)));
     chkerr(cudaMemset(totalCliques, 0, sizeof(ui)));
+
     size_t sharedMemoryFinal =  WARPS_EACH_BLK * sizeof(ui);
 
-
+    // Set status to of each clique to -2, representing not a valid clique.
     thrust::device_ptr<int> dev_ptr(cliqueData.status);
     thrust::fill(dev_ptr, dev_ptr + t, -2);
 
     chkerr(cudaMemset(cliqueData.trie, 0, t * k * sizeof(ui)));
     if(iterK == 2) {
+
+        // Write final k-cliques based on the partial cliques to global memory.
         writeFinalCliques<<<BLK_NUMS, BLK_DIM,sharedMemoryFinal>>>(deviceGraph, deviceDAG, levelData, cliqueData, totalCliques, k, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, t,totalTasks, level, TOTAL_WARPS);
         cudaDeviceSynchronize();
         CUDA_CHECK_ERROR("Generate Full Cliques");
@@ -234,6 +267,8 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
         cout<<endl;
 
     }
+    
+    // Actual total cliques in the graph.
     ui tt;
     chkerr(cudaMemcpy(&tt, totalCliques, sizeof(ui), cudaMemcpyDeviceToHost));
     
@@ -252,20 +287,26 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
     ui *bufTails  = NULL;
     ui *glBuffers = NULL;
 
+    // Total verticies that are removed.
     chkerr(cudaMalloc((void**)&(globalCount), sizeof(ui)));
-    chkerr(cudaMalloc((void**)&(bufTails), BLK_NUMS*sizeof(ui)));
+
+    // stores the verticies that need to be removed in peeling algo.
+    // Each warp stores in its virtual partition
     chkerr(cudaMalloc((void**)&(glBuffers), BLK_NUMS*glBufferSize*sizeof(ui)));
+
+    // stores the end index of verticies in glBuffer for each warp
+    chkerr(cudaMalloc((void**)&(bufTails), BLK_NUMS*sizeof(ui)));
     chkerr(cudaMemset(globalCount, 0, sizeof(ui)));
     cudaDeviceSynchronize();
 
-
-
+    // set clique core to clique degree
     chkerr(cudaMemcpy(deviceGraph.cliqueCore, deviceGraph.cliqueDegree, graph.n * sizeof(ui), cudaMemcpyDeviceToDevice));
-
 
     thrust::device_vector<int> dev_vec(cliqueData.status, cliqueData.status + t);
 
+    // total cliques yet to be removed
     ui currentCliques = thrust::count(dev_vec.begin(), dev_vec.end(), -1);
+
     double currentDensity = static_cast<double>(currentCliques) / (graph.n - count);
 
     maxDensity = currentDensity;
@@ -288,22 +329,23 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
         ui sum = thrust::reduce(dev_vec1.begin(), dev_vec1.end(), 0, thrust::plus<ui>());
         cudaDeviceSynchronize();
 
-
+        // Remove the verticies whose core value is current level and update clique degrees
         processNodesByWarp<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, t, tt);
         cudaDeviceSynchronize();
         CUDA_CHECK_ERROR("Process Node Core Decompose");
 
-
+        // update the total verticies that are removed
         chkerr(cudaMemcpy(&count, globalCount, sizeof(unsigned int), cudaMemcpyDeviceToHost));
 
         level++;
         thrust::device_vector<int> dev_vec2(cliqueData.status, cliqueData.status + t);
 
-
+        // get the density of current core
        if((graph.n - count)!=0){
         currentCliques = thrust::count(dev_vec2.begin(), dev_vec2.end(), -1);
         currentDensity = static_cast<double>(currentCliques) / (graph.n - count);
 
+        // update max density 
         if(currentDensity>=maxDensity){
             maxDensity = currentDensity;
             maxCore = level;
@@ -324,6 +366,8 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
 }
 
 ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, densestCorePointer &densestCore, ui coreSize, ui coreTotalCliques, ui lowerBoundDensity){
+    
+    // stores the densest core in the graph
     memoryAllocationDensestCore(densestCore, coreSize, lowerBoundDensity , coreTotalCliques);
 
     ui *globalCount;
@@ -331,10 +375,10 @@ ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, dens
     chkerr(cudaMalloc((void**)&globalCount, sizeof(ui)));
     chkerr(cudaMemset(globalCount, 0, sizeof(ui)));
 
+    // Generates densest core, remaps its verticies and calculates the new offset.
     generateDensestCore<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,densestCore,globalCount,graph.n,lowerBoundDensity,TOTAL_WARPS);
     cudaDeviceSynchronize();
-        CUDA_CHECK_ERROR("Generate Densest Core");
-
+    CUDA_CHECK_ERROR("Generate Densest Core");
 
     if(DEBUG){
         ui *h_offset;
@@ -350,9 +394,7 @@ ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, dens
 
     }
     
-
-
-
+    // cum sum to get the offset
     thrust::inclusive_scan(thrust::device_ptr<ui>(densestCore.offset), thrust::device_ptr<ui>(densestCore.offset + coreSize + 1), thrust::device_ptr<ui>(densestCore.offset));
 
     //debug
@@ -379,34 +421,26 @@ ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, dens
 
     }
     
-
-
+    // Size of new neighbor list
     ui edgeCountCore;
     chkerr(cudaMemcpy(&edgeCountCore, densestCore.offset+coreSize , sizeof(ui), cudaMemcpyDeviceToHost));
-
-    //cout<<"edgeCountCore "<<edgeCountCore<<endl;
 
     chkerr(cudaMemcpy(densestCore.m,&edgeCountCore, sizeof(ui), cudaMemcpyHostToDevice));
     chkerr(cudaMalloc((void**)&(densestCore.neighbors), edgeCountCore * sizeof(ui)));
 
+    // get the recerse mapping of verticies 
     thrust::device_ptr<unsigned int> d_vertex_map_ptr(densestCore.mapping);
     thrust::device_ptr<unsigned int> d_reverse_map_ptr(densestCore.reverseMap);
 
-
     thrust::device_vector<unsigned int> d_indices(coreSize);
     thrust::sequence(d_indices.begin(), d_indices.end());
-    // Scatter indices into the reverse mapping array
     thrust::scatter(d_indices.begin(), d_indices.end(), d_vertex_map_ptr, d_reverse_map_ptr);
 
-
-    //cout<<"gaph size "<<graph.n<<" core size "<<coreSize<<endl;
-
-
     size_t sharedMemoryGenNeighCore =  WARPS_EACH_BLK * sizeof(ui);
+    // Generate remaped neighbor list of the densest core
     generateNeighborDensestCore<<<BLK_NUMS, BLK_DIM,sharedMemoryGenNeighCore>>>(deviceGraph,densestCore,lowerBoundDensity,TOTAL_WARPS);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Generate Densest Core neighbors");
-
 
     //Debug
     if(DEBUG){
@@ -421,8 +455,6 @@ ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, dens
         cout<<endl;
 
     }
-
-
 
     return edgeCountCore;
 
@@ -511,10 +543,12 @@ ui prune(densestCorePointer &densestCore, deviceCliquesPointer &cliqueData, devi
 
 int componentDecompose(deviceComponentPointers &conComp,devicePrunedNeighbors &prunedNeighbors, ui vertexCount, ui edgecount){
 
+    // flag indicating if any thread changed the component id of any vertex.
     ui *changed;
     chkerr(cudaMalloc((void**)&changed, sizeof(ui)));
     chkerr(cudaMemset(changed, 0 , sizeof(ui)));
 
+    // set component id of each vertex to its index.
     thrust::device_ptr<ui> components = thrust::device_pointer_cast(conComp.components);
     thrust::sequence(components, components + vertexCount);
 
@@ -523,6 +557,7 @@ int componentDecompose(deviceComponentPointers &conComp,devicePrunedNeighbors &p
     ui hostChanged;
     do{
       chkerr(cudaMemset(changed, 0 , sizeof(ui)));
+      // changes component id of a vertex by convergence.
       componentDecomposek<<<BLK_NUMS, BLK_DIM>>>(conComp, prunedNeighbors, changed, vertexCount, edgecount, TOTAL_WARPS);
       cudaDeviceSynchronize();
       CUDA_CHECK_ERROR("Coponenet Decompose");
@@ -548,15 +583,15 @@ int componentDecompose(deviceComponentPointers &conComp,devicePrunedNeighbors &p
     thrust::copy(components, components + vertexCount, sorted_components.begin());
     thrust::sort(sorted_components.begin(), sorted_components.end());
 
-    // 2. Get truly unique components (now properly handles non-contiguous duplicates)
+    // Total Unique components
     auto unique_end = thrust::unique(sorted_components.begin(), sorted_components.end());
     int totalComponents = unique_end - sorted_components.begin();
     cout << "Unique components: " << totalComponents << endl;
 
-    // 3. Create component offset array
+    // Create component offset array
     thrust::device_ptr<ui> componentOffsets(conComp.componentOffset);
 
-    // Need to sort the original components for lower_bound to work correctly
+    // Get component offset 
     thrust::device_vector<ui> temp_sorted(vertexCount);
     thrust::copy(components, components + vertexCount, temp_sorted.begin());
     thrust::sort(temp_sorted.begin(), temp_sorted.end());
@@ -568,14 +603,14 @@ int componentDecompose(deviceComponentPointers &conComp,devicePrunedNeighbors &p
     );
     componentOffsets[totalComponents] = vertexCount;
 
-    // 4. Renumber components to be contiguous (0,1,2,...)
+    // Renumber component id. 
     thrust::lower_bound(
         sorted_components.begin(), unique_end,
         components, components + vertexCount,
         components // In-place remap
     );
 
-    // 5. Create and sort mapping array
+    // Create component mapping
     thrust::sequence(thrust::device_pointer_cast(conComp.mapping), 
                     thrust::device_pointer_cast(conComp.mapping + vertexCount));
 
@@ -621,14 +656,14 @@ int main(int argc, const char * argv[]) {
         exit(1);
     }
 
-    string filepath = argv[1]; // Path to the graph file. The graph should be represented as an adjacency list with space separators
-    string motifPath = argv[2]; //Path to motif file. The motif should be represented as edge list with space sperators.
-    ui k = atoi(argv[3]);
-    ui pSize = atoi(argv[4]);
-    ui cpSize = atoi(argv[5]);
-    ui glBufferSize = atoi(argv[6]);
-    ui partitionSize = atoi(argv[7]);
-    ui t = atoi(argv[8]);
+    string filepath = argv[1]; //  Path to the graph file. The graph should be represented as an adjacency list with space separators
+    string motifPath = argv[2]; // Path to motif file. The motif should be represented as edge list with space sperators. Not used yet
+    ui k = atoi(argv[3]);       // The clique we are intrested in. 
+    ui pSize = atoi(argv[4]);   // Virtual Partition size for storing partial cliques in Listing Algorithm 
+    ui cpSize = atoi(argv[5]);  // Virtual Partition size for storing Candidates of PC in Listing Algorithm
+    ui glBufferSize = atoi(argv[6]);  // Buffer to store the vertices that need to be removed in clique core decompose peeling algorithm 
+    ui partitionSize = atoi(argv[7]); // Virtual Partition to store the active node of each flownetwork
+    ui t = atoi(argv[8]);             // Total Number of cliques.
 
     if(DEBUG){
         cout << "filepath: " << filepath << endl;
@@ -637,9 +672,8 @@ int main(int argc, const char * argv[]) {
         cout << "pSize: " << pSize << endl;
         cout << "cpSize: " << cpSize << endl;
     }
-    //find a way to do this
     
-    
+    // Read Graph as a adcajency List. 
     Graph graph = Graph(filepath);
 
     //Print Graph
@@ -662,7 +696,9 @@ int main(int argc, const char * argv[]) {
         cout<<endl;
 
     }
-    
+
+    // Stores the listing order based on core values: 
+    // vertices with higher core values are assigned lower (better) ranks.
     vector<ui> listingOrder;
     listingOrder.resize(graph.n);
     graph.getListingOrder(listingOrder);
@@ -684,14 +720,21 @@ int main(int argc, const char * argv[]) {
 
     }
 
+    // Structure to store the graph on device
     memoryAllocationGraph(deviceGraph, graph);
 
+    // Generates the DAG based on the listing order.
+    // Only includes edges from a vertex with a lower listing order to one with a higher listing order.
     generateDAG(graph,deviceGraph, deviceDAG,listingOrder);
 
+    // List all k-cliques in the graph
     ui tt = listAllCliques(graph, deviceGraph, deviceDAG, levelData, k, pSize, cpSize,t);
+
 
     ui coreSize, coreTotalCliques,maxCore;
     double maxDensity;
+
+    // Peeling algorithm to get the k-clique core of each vertex.
     cliqueCoreDecompose(graph,deviceGraph,cliqueData,maxCore, maxDensity, coreSize, coreTotalCliques,glBufferSize, k,  t, tt);
 
     if(DEBUG){
@@ -717,20 +760,26 @@ int main(int argc, const char * argv[]) {
     
     ui lowerBoundDensity = maxCore;
  
+    // Find the densest core in the graph.
     ui edgecount = generateDensestCore(graph,deviceGraph,  densestCore, coreSize, coreTotalCliques,lowerBoundDensity);
 
     ui vertexCount;
     chkerr(cudaMemcpy(&vertexCount, densestCore.n, sizeof(ui), cudaMemcpyDeviceToHost));
 
+    // Structure to store the prunned neighbors
     memoryAllocationPrunnedNeighbors(prunedNeighbors, vertexCount , edgecount);
 
+    // Prune invalid edges i.e. edges that are not part of any clique.
     ui newEdgeCount = prune(densestCore, cliqueData, prunedNeighbors, vertexCount, edgecount, k, t, tt, lowerBoundDensity);
 
+    // Structure to store connected components
     memoryAllocationComponent(conComp, vertexCount , newEdgeCount);
 
+    // Decomposes the graph into connected components and remaps vertex IDs within each component.
     ui totalComponents = componentDecompose(conComp, prunedNeighbors, vertexCount, newEdgeCount);
 
     //Dynamic exact
+
 
     thrust::device_ptr<unsigned int> d_vertex_map_ptr(conComp.mapping);
     thrust::device_ptr<unsigned int> d_reverse_map_ptr(conComp.reverseMapping);

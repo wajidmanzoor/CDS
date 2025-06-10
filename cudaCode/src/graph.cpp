@@ -39,6 +39,9 @@ Graph::Graph(std::string path) {
     std::cout << "n =" << n << ", m=" << m << std::endl;
 }
 void Graph::getListingOrder(std::vector<ui>& arr) {
+    /* Rettrun an array with each index storing the listing order based on the core value.
+    Listing order is a unique number.
+    high core values get low listing order*/
     corePeelSequence.resize(n);
     coreDecompose(corePeelSequence);
 
@@ -48,6 +51,8 @@ void Graph::getListingOrder(std::vector<ui>& arr) {
 }
 
 void Graph::coreDecompose(std::vector<ui>& arr) {
+    /* Peeling algorithm to find the core values of each vertex.
+       Returns the peeling sequence i.e. verticies in increaseing order of core values. */
     core.resize(n);
     int maxDegree = *std::max_element(degree.begin(), degree.end());
     std::cout << "maxDegree = " << maxDegree << std::endl;
