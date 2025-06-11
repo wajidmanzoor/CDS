@@ -14,6 +14,8 @@
 #include <cooperative_groups.h>
 #include <cub/cub.cuh>
 
+#include <chrono>
+
 
 bool DEBUG = false;
 
@@ -720,6 +722,8 @@ int main(int argc, const char * argv[]) {
 
     }
 
+    auto start = std::chrono::high_resolution_clock::now();
+
     // Structure to store the graph on device
     memoryAllocationGraph(deviceGraph, graph);
 
@@ -780,7 +784,7 @@ int main(int argc, const char * argv[]) {
 
     //Dynamic exact
 
-
+    // Get reverse maping for connected component
     thrust::device_ptr<unsigned int> d_vertex_map_ptr(conComp.mapping);
     thrust::device_ptr<unsigned int> d_reverse_map_ptr(conComp.reverseMapping);
 
@@ -795,11 +799,11 @@ int main(int argc, const char * argv[]) {
     chkerr(cudaMemset(compCounter, 0, (totalComponents+1) * sizeof(ui)));
 
     // Get total cliques of each connected components
-
     getConnectedComponentStatus<<<BLK_NUMS, BLK_DIM>>>(conComp,cliqueData, densestCore,compCounter,t, tt,k, maxCore,TOTAL_THREAD);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Calculate total cliques for each Component");
 
+    // Total cliques offset
     thrust::inclusive_scan(
         thrust::device_pointer_cast(compCounter),
         thrust::device_pointer_cast(compCounter + totalComponents + 1),
@@ -816,6 +820,8 @@ int main(int argc, const char * argv[]) {
     ui *counter;
     chkerr(cudaMalloc((void**)&(counter), totalComponents* sizeof(ui)));
     chkerr(cudaMemset(counter, 0, totalComponents * sizeof(ui)));
+
+    // Rearrange cliques by connected component
     rearrangeCliqueData<<<BLK_NUMS, BLK_DIM>>>(conComp, cliqueData,  finalCliqueData, densestCore, compCounter, counter, t,  tt,  k, totaLCliques,TOTAL_THREAD);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Rearragne CLique Data");
@@ -862,6 +868,7 @@ int main(int argc, const char * argv[]) {
     // Convert to double and return
     double md =  static_cast<double>(max_int);
 
+    // Calculate upper bound and lower bound of density for each connected component.
     getLbUbandSize<<<BLK_NUMS, BLK_DIM>>>( conComp, compCounter, lowerBound, upperBound, flowNetwork.offset, flowNetwork.neighborOffset1, totalComponents, k, md);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Get UB LU and Size");
@@ -879,7 +886,8 @@ int main(int argc, const char * argv[]) {
     ui flownetworkVertexSize, flownetworkNeighborSize;
     chkerr(cudaMemcpy(&flownetworkVertexSize, flowNetwork.offset+totalComponents, sizeof(ui), cudaMemcpyDeviceToHost));
     chkerr(cudaMemcpy(&flownetworkNeighborSize, flowNetwork.neighborOffset1+totalComponents, sizeof(ui), cudaMemcpyDeviceToHost));
-
+    
+    //Allocate memory for flownetwork
     memoryAllocationFlowNetwork(flowNetwork, flownetworkVertexSize, flownetworkNeighborSize, totalComponents);
 
     if(DEBUG){
@@ -924,17 +932,15 @@ int main(int argc, const char * argv[]) {
      // Find the maximum element in the lowerBound array
     thrust::device_ptr<double> max_iter = thrust::max_element(dev_lowerBound, dev_lowerBound + totalComponents);
 
-    // Copy the result back to host if needed
     double max_lowerBound = *max_iter;
 
     //double just  = 1.0;
-
+    // Calculate flow network offset for edges.
     createFlowNetworkOffset<<<BLK_NUMS, BLK_DIM>>>( deviceGraph, flowNetwork, conComp, densestCore, finalCliqueData,   compCounter, upperBound,TOTAL_WARPS, totalComponents, k, max_lowerBound, totaLCliques);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Create Flow Network Offset");
 
-
-
+    // cum sum to get offset
     thrust::inclusive_scan(
         thrust::device_pointer_cast(flowNetwork.neighborOffset2),
         thrust::device_pointer_cast(flowNetwork.neighborOffset2 + flownetworkVertexSize),
@@ -952,6 +958,8 @@ int main(int argc, const char * argv[]) {
         }
         cout<<endl;
     }
+    
+    // create flow network ie. edges, capacities, flow etc
     createFlowNetwork<<<BLK_NUMS, BLK_DIM>>>( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter,upperBound , TOTAL_WARPS, totalComponents, k, max_lowerBound , totaLCliques);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Create Flow Network");
@@ -1000,39 +1008,51 @@ int main(int argc, const char * argv[]) {
 
     }
 
+    // stores nodes with excess
     ui *activeNodes;
 
     cudaMalloc((void**)&activeNodes, partitionSize*TOTAL_WARPS * sizeof(ui));
     chkerr(cudaMemset(flowNetwork.flow,0,(flownetworkNeighborSize)* sizeof(double)));
 
-    size_t sharedMemorySize=  WARPS_EACH_BLK * sizeof(ui);
+    // num of flownetworks that haven't converged yet.
     ui *componenetsLeft;
     ui left = 1;
 
     chkerr(cudaMalloc((void**)&componenetsLeft,sizeof(ui)));
     chkerr(cudaMemset(componenetsLeft,0,sizeof(ui)));
 
-
+    // Maximum densities for each connected component
     double *densities;
     cudaMalloc((void**)&densities,totalComponents*sizeof(double));
-     chkerr(cudaMemset(densities,0,totalComponents*sizeof(double)));
+    chkerr(cudaMemcpy(densities,lowerBound,totalComponents*sizeof(double),cudaMemcpyDeviceToDevice));
+
+    // Falg to indicate if densisty of connected component needs to be updated
+    ui *checkResult;
+    chkerr(cudaMalloc((void**)&checkResult,totalComponents*sizeof(ui)));
 
      //float *densityMax;
+    size_t sharedMemorySize=  WARPS_EACH_BLK * sizeof(ui);
 
     //ui wajid =0;
     while(left!=0){
       chkerr(cudaMemset(componenetsLeft,0,sizeof(ui)));
-      pushRelabel<<<BLK_NUMS, BLK_DIM,sharedMemorySize>>>( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter,upperBound,lowerBound, activeNodes,componenetsLeft,TOTAL_WARPS, totalComponents, k,totaLCliques, partitionSize);
+      chkerr(cudaMemset(checkResult,0,totalComponents*sizeof(ui)));
+
+      // Push relabel algorithm to solve a flow network
+      pushRelabel<<<BLK_NUMS, BLK_DIM,sharedMemorySize>>>( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter,upperBound,lowerBound, activeNodes,componenetsLeft,checkResult,TOTAL_WARPS, totalComponents, k,totaLCliques, partitionSize);
       cudaDeviceSynchronize();
       CUDA_CHECK_ERROR("Push Relabel");
 
       cudaMemcpy(&left,componenetsLeft,sizeof(ui),cudaMemcpyDeviceToHost);
       
-      getResult<<<BLK_NUMS, BLK_DIM,sharedMemorySize>>>( flowNetwork,  conComp,  finalCliqueData, compCounter, upperBound, lowerBound, densities, TOTAL_WARPS, totalComponents, k, t);
+      // calculate density of current densest subgraph.
+      getResult<<<BLK_NUMS, BLK_DIM,sharedMemorySize>>>( flowNetwork,  conComp,  finalCliqueData, compCounter, upperBound, lowerBound, densities, checkResult, TOTAL_WARPS, totalComponents, k, t);
       cudaDeviceSynchronize();
       CUDA_CHECK_ERROR("Gather Results");
 
       chkerr(cudaMemset(flowNetwork.flow,0,(flownetworkNeighborSize)* sizeof(double)));
+      //chkerr(cudaMemset(flowNetwork.excess,0,(flownetworkVertexSize)* sizeof(double)));
+
 
 
     }
@@ -1082,6 +1102,11 @@ int main(int argc, const char * argv[]) {
 
     thrust::device_ptr<double> dev_densities(densities);
     double max_density = *thrust::max_element(dev_densities, dev_densities + totalComponents);
+    auto end = std::chrono::high_resolution_clock::now();
+
+    // Calculate and print duration
+    std::chrono::duration<double, std::milli> duration_ms = end - start;
+    std::cout << "Time taken: " << duration_ms.count() << " ms" << std::endl;
 
     std::cout << "Max density: " << max_density << std::endl;
 
