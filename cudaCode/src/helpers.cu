@@ -1058,12 +1058,19 @@ __global__ void componentDecomposek(deviceComponentPointers conComp, devicePrune
 
 __global__ void getConnectedComponentStatus(deviceComponentPointers conComp,deviceCliquesPointer cliqueData, densestCorePointer densestCore, ui *compCounter, ui t, ui tt, ui k,ui maxCore, ui totalThreads){
 
+    /* Sets the status of each clique to its connected component. 
+    Calculate total cliques for each connected component.
+    Each thread processes a clique.*/
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
+    // iter through cliques.
     for(ui i =idx; i<tt;i +=totalThreads){
+
+        // if clique belongs to densest core
         if(cliqueData.status[i]>=maxCore){
           int comp = INT_MAX;
 
+          // get its connected component
           for(ui x=0;x<k;x++){
             ui vertex =densestCore.reverseMap[cliqueData.trie[x*t + i]];
             comp = min(comp,conComp.components[conComp.reverseMapping[vertex]]);
@@ -1072,7 +1079,10 @@ __global__ void getConnectedComponentStatus(deviceComponentPointers conComp,devi
 
 
           }
+
           cliqueData.status[i] = comp;
+
+          // increament num of cliques 
           atomicAdd(&compCounter[comp+1],1);
 
 
@@ -1084,13 +1094,20 @@ __global__ void getConnectedComponentStatus(deviceComponentPointers conComp,devi
 }
 
 __global__ void rearrangeCliqueData(deviceComponentPointers conComp,deviceCliquesPointer cliqueData, deviceCliquesPointer finalCliqueData,densestCorePointer densestCore, ui *compCounter,ui *counter,ui t, ui tt, ui k,ui totaLCliques, ui totalThreads){
+    /*Rearrange cliques by component id.
+    each thread processes on clique*/
+    
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // iter through each clique
     for(ui i =idx; i<tt;i +=totalThreads){
 
         int comp =  cliqueData.status[i];
-
+        // if clique is part of any connected component of  densest core.
         if(comp>-1){
           ui loc;
+
+          // write in global memeory based on offset.
           for(ui j=0;j<k;j++){
               ui vertex = cliqueData.trie[j*t + i];
               ui offset = compCounter[comp];
@@ -1109,6 +1126,10 @@ __global__ void rearrangeCliqueData(deviceComponentPointers conComp,deviceClique
 }
 
 __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter, double *lowerBound, double *upperBound, ui *ccOffset,  ui *neighborSize, ui totalComponenets, ui k, double maxDensity){
+    /* Get upper and lower bound of max density.
+     Get total size of verticies and edges in each connected component flow network
+     Each thread calculates for one connected component*/
+    
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx==0){
         ccOffset[idx]=0;
@@ -1116,20 +1137,30 @@ __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter,
 
     }
 
+    // iter through each connected component.
     for(ui i = idx; i<totalComponenets; i+=TOTAL_THREAD ){
+
         ui totalCliques = compCounter[i+1] - compCounter[i];
         ui totalSize = conComp.componentOffset[i+1] -  conComp.componentOffset[i];
+
+        // Actual density of the connected component.
         double lb = (double) (totalCliques)/totalSize;
         lowerBound[i]  = lb;
 
+        // based on total number of cliques in the connected componennt,
+        // Find the minimum number of verticies required to get that many cliques. 
+        // Asuming we have the minimum number of verticies, we get the upper bound of max density for this connected component.
         double dem = pow(fact(k),1.0/k);
         double num = pow(totalCliques, (k-1.0)/k);
         double ub = min(maxDensity, num/dem);
 
         upperBound[i] = ub;
 
+        // if ub is greater only then flow network will be created, else not required
         if(ub>lb){
+            // Total number of verticies in flow network + 1 
             ccOffset[i+1] = totalCliques + totalSize + 2 +1 ;
+            // Total number of edges in flow network + 1
             neighborSize[i+1] = 2*(2*totalCliques*k + 2*totalSize)+1;
 
 
@@ -1146,7 +1177,8 @@ __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter,
 
 
 __global__ void createFlowNetworkOffset(deviceGraphPointers G, deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,double *upperBound , ui totalWarps, ui totalComponents, ui k, double lb, ui t){
-
+    /*Create the offset for edges (neighbors) in flow network 
+    Each warp process a connected component */
 
 
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1164,10 +1196,8 @@ __global__ void createFlowNetworkOffset(deviceGraphPointers G, deviceFlowNetwork
             ui totalCliques = compCounter[i+1]-compCounter[i];
 
             ui vertexOffset = flowNetwork.offset[i];
-            //ui neighborOffset = flowNetwork.neighborOffset1[i];
 
-            //printf("warpid %d laneId %d start %d end %d total %d neighborOffset %d \n",warpId,laneId,start,end,total,neighborOffset);
-
+            // iter through each vertex, to get its clique degree in connected component.
             for (ui j = laneId; j < total; j += warpSize){
                 ui vertex = conComp.mapping[start+j];
 
@@ -1183,13 +1213,22 @@ __global__ void createFlowNetworkOffset(deviceGraphPointers G, deviceFlowNetwork
 
 
                 }
+                // each vertex is connected to its cliques and sink. (degree + 1)
+                // Also has bacward edge to source (1)
+                // Also backward edges to its cliques. (degree)
                 flowNetwork.neighborOffset2[vertexOffset+j + 1] = 2*(cliqueDegree + 1);
             }
             for (ui j = laneId; j < totalCliques; j += warpSize){
+                // Each cliques will be connected to its verticies (k)
+                // Also have backward edges to verticies (k)
                 flowNetwork.neighborOffset2[vertexOffset+total+j+1] = 2*k;
             }
             if(laneId==0){
+                
+                // source is connected to all verticies.
                 flowNetwork.neighborOffset2[vertexOffset+total+totalCliques+1] = total;
+
+                // from sink we have a backward edge to all verticies 
                 flowNetwork.neighborOffset2[vertexOffset+total+totalCliques+2] = total;
                 flowNetwork.neighborOffset2[0]=0;
             }
@@ -1201,7 +1240,8 @@ __global__ void createFlowNetworkOffset(deviceGraphPointers G, deviceFlowNetwork
 
 __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui *compCounter,double *upperBound , ui totalWarps, ui totalComponents, ui k, double lb, ui t){
 
-
+    /* Create actual flow network 
+    Each warp processes one connected component*/
 
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
@@ -1221,13 +1261,12 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
 
             double alpha = upperBound[i]/lb;
 
-            //printf("warpid %d laneId %d start %d end %d total %d neighborOffset %d \n",warpId,laneId,start,end,total,neighborOffset);
 
             for (ui j = laneId; j < total; j += warpSize){
                 ui neighborOffset = flowNetwork.neighborOffset2[vertexOffset+j];
 
 
-                // Vertex to sink
+                // Edge from Vertex to sink
                 flowNetwork.Edges[neighborOffset] = total+totalCliques+1;
                 flowNetwork.capacity[neighborOffset] = alpha * k;
 
@@ -1252,7 +1291,7 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
                         flowNetwork.Edges[neighborOffset+ temp] = total+x;
                         flowNetwork.capacity[neighborOffset+ temp] = 1.0;
 
-                        // vertex to clique backward
+                        // vertex to clique (backward)
                         flowNetwork.Edges[neighborOffset+ temp+ 1] = total+x;
                         flowNetwork.capacity[neighborOffset+ temp+1] = 0.0;
                         temp+=2;
@@ -1276,7 +1315,7 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
                     flowNetwork.Edges[neighborOffset+ 2*k_ ] = conComp.reverseMapping[u] -start;
                     flowNetwork.capacity[neighborOffset+ 2*k_] = DINF;
 
-                    //Clique to vertex backward
+                    //Clique to vertex (backward)
                     flowNetwork.Edges[neighborOffset+ 2*k_ +1 ] = conComp.reverseMapping[u] -start;
                     flowNetwork.capacity[neighborOffset+ 2*k_ + 1] = 0;
 
@@ -1298,7 +1337,7 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
                 flowNetwork.capacity[neighborOffset_source+ j] = (double) cliqueDegree;
 
 
-                //sink to vertex backward
+                //sink to vertex (backward)
                  flowNetwork.Edges[neighborOffset_sink+ j] = j;
                 flowNetwork.capacity[neighborOffset_sink+ j] = 0.0;
 
@@ -1312,19 +1351,18 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
     }
  }
 
-__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui * compCounter, double * upperBound, double * lowerBound, ui * activeNodes, ui * componenetsLeft, ui totalWarps, int totalComponents, ui k,ui t, ui partitionSize) {
-  extern __shared__ char sharedMemory[];
-  ui sizeOffset = 0;
+__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui * compCounter, double * upperBound, double * lowerBound, ui * activeNodes, ui * componenetsLeft, ui *checkResult,ui totalWarps, int totalComponents, ui k,ui t, ui partitionSize) {
+  /* Applies push relabel algorithm of flow network of each connected component.
+    One warp process flownetwork of a connected compoenent.*/
+  
+    extern __shared__ char sharedMemory[];
+    ui sizeOffset = 0;
 
-  ui * counter = (ui * )(sharedMemory + sizeOffset);
+    ui * counter = (ui * )(sharedMemory + sizeOffset);
 
-  // += WARPS_EACH_BLK * sizeof(ui);
-  //sizeOffset = (sizeOffset + alignof(double) - 1) & ~(alignof(double) - 1);
-  //ui *densities = (ui *)(sharedMemory + sizeOffset);
-
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  int warpId = idx / warpSize;
-  int laneId = idx % warpSize;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int warpId = idx / warpSize;
+    int laneId = idx % warpSize;
 
   for (ui i = warpId; i < totalComponents; i += totalWarps) {
     ui start = conComp.componentOffset[i];
@@ -1340,14 +1378,18 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceCompone
     ui tFlow = totalCliques + total + 2;
 
     double bais = 1.0 / (tFlow * (tFlow - 1));
+    if(bais<0.000000000000001){
+			bais=0.000000000000001;
+	}
 
+    // if difference greater than bais
     if ((upperBound[i] - lowerBound[i]) > bais) {
 
 
       ui s = tFlow - 2;
       ui t = tFlow - 1;
 
-      //Set Height to 0 expect for s to total
+      //Set Height to 0 expect for source set to total nodes in flownetwork
       for (ui j = laneId; j < tFlow; j += warpSize) {
         flowNetwork.height[fStart + j] = (j == s) ? tFlow : 0;
         flowNetwork.excess[fStart + j] = 0;
@@ -1355,26 +1397,25 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceCompone
       }
       __syncwarp();
 
-      // Send Intial flow for s to all v
+      // Send Intial flow for source to all verticies (flooding)
       for (ui j = laneId; j < total; j += warpSize) {
         ui nStart = flowNetwork.neighborOffset2[fStart + totalCliques + total];
         ui neigh = flowNetwork.Edges[nStart + j];
         double cap = flowNetwork.capacity[nStart + j];
 
-        //Forward Flow s to vertex
+        //Forward Flow source to vertex
         flowNetwork.flow[nStart + j] = cap;
         atomicAdd( & flowNetwork.excess[fStart + neigh], cap);
 
-        //BackwardFlow vertex to s
+        //BackwardFlow vertex to source
         flowNetwork.flow[flowNetwork.neighborOffset2[fStart + neigh] + 1] = -cap;
 
       }
 
       __syncwarp();
 
-      int maxIterations = 4;
+      int maxIterations = 1000;
 
-      //printf("warpid %d laneid %d\n ", warpId,laneId);
 
       //Push or Relabel until converge
       for (int iter = 0; iter < maxIterations; iter++) {
@@ -1383,14 +1424,13 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceCompone
         }
         __syncwarp();
 
-        //check for nodes with excess
+        //check for nodes with excess, if excess write in active nodes
         for (ui j = laneId; j < tFlow; j += warpSize) {
           if (j != s && j != t && flowNetwork.excess[fStart + j] > 0) {
             int pos = atomicAdd( & counter[threadIdx.x / warpSize], 1);
             if (pos < partitionSize) {
               activeNodes[i * partitionSize + pos] = j;
             }
-           // printf("warp id %d lane id %d pos %d u %d  iter %d \n", i, j, pos, j, iter);
 
           }
         }
@@ -1402,29 +1442,25 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceCompone
 
         bool pushed = false;
 
+        // Iter through active nodes
         for (ui j = laneId; j < counter[threadIdx.x / warpSize]; j += warpSize) {
           ui vertex = activeNodes[i * partitionSize + j];
 
           ui nStart = flowNetwork.neighborOffset2[fStart + vertex];
           ui nEnd = flowNetwork.neighborOffset2[fStart + vertex + 1];
-          //printf("warpid %d lane id %d read ver %d excess %f height %d offset %d nstart %d end %d \n", i, j, vertex, flowNetwork.excess[fStart + vertex], flowNetwork.height[fStart + vertex], fStart, nStart, nEnd);
 
-          //Check neighbors to send acess to.
+        // iter through their neighbors sequentially
           for (ui x = nStart; x < nEnd; x++) {
-            //
-            /*if (flowNetwork.excess[fStart + vertex] == 0) {
-              break;
-            }*/
+          
             ui neigh = flowNetwork.Edges[x];
             double residual = flowNetwork.capacity[x] - flowNetwork.flow[x];
 
 
             __syncwarp();
 
-            // If neighbor has capacity
+            // If neighbor has capacity, and heigh condition is met
             if ((flowNetwork.height[fStart + vertex] == flowNetwork.height[fStart + neigh] + 1) && residual > 0) {
 
-              //printf("warp Id %d laneid %d vertex %d nstart %d end %d neigh %d resi %f cap %f flow %f loc %d hv %d hu %d ev %f en %f \n", i, j, vertex, nStart, nEnd, neigh, residual, flowNetwork.capacity[x], flowNetwork.flow[x], x, flowNetwork.height[fStart + vertex], flowNetwork.height[fStart + neigh], flowNetwork.excess[fStart + vertex], flowNetwork.excess[fStart + neigh]);
 
               double delta = min(flowNetwork.excess[fStart + vertex], residual);
               if (delta > 0) {
@@ -1450,7 +1486,6 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceCompone
                 pushed = true;
 
               }
-             // printf("after -- warp Id %d laneid %d vertex %d nstart %d end %d neigh %d resi %f cap %f flow %f loc %d hv %d hu %d ev %f en %f \n", i, j, vertex, nStart, nEnd, neigh, residual, flowNetwork.capacity[x], flowNetwork.flow[x], x, flowNetwork.height[fStart + vertex], flowNetwork.height[fStart + neigh], flowNetwork.excess[fStart + vertex], flowNetwork.excess[fStart + neigh]);
 
             }
 
@@ -1458,26 +1493,27 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceCompone
 
           __syncwarp();
 
-          // Relabel
+          // Relabel if not pushed 
           if (!pushed && flowNetwork.excess[fStart + vertex] > 0) {
             ui minHeight = UINT_MAX;
-            //printf("Relabel  WarpId %d laneid %d vertex %d excess %f height %d nstart %d end %d \n", i, laneId, vertex, flowNetwork.excess[fStart + vertex], flowNetwork.height[fStart + vertex], nStart, nEnd);
+
+            // Find minimum height among all neighbors
             for (ui x = nStart; x < nEnd; x++) {
               ui neigh = flowNetwork.Edges[x];
               double residual = flowNetwork.capacity[x] - flowNetwork.flow[x];
-              //printf("warp %d laneid %d j %d v %d res %f negh %d height %d nstart %d \n", i, laneId, j, vertex, residual, neigh, flowNetwork.height[fStart + neigh], nStart);
 
               if (residual > 0.0) {
                 minHeight = (flowNetwork.height[fStart + neigh] < minHeight) ? flowNetwork.height[fStart + neigh] : minHeight;
               }
 
             }
+
+            // set new height of node
             if (minHeight != INF) {
               flowNetwork.height[fStart + vertex] = minHeight + 1;
 
             }
 
-            //printf("after Relabel  WarpId %d laneid %d vertex %d excess %f height %d minHeight %d \n", i, laneId, vertex, flowNetwork.excess[fStart + vertex], flowNetwork.height[fStart + vertex], minHeight);
 
           }
           __syncwarp();
@@ -1488,18 +1524,23 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceCompone
       __syncwarp();
 
 
-      //printf("second warpid %d laneid %d\n ", warpId,laneId);
 
       if(laneId==0){
-        //getRes[threadIdx.x / warpSize] = 0;
+        // Adjust lower and upper bound based on max flow
         double alpha = (upperBound[i] + lowerBound[i]) / 2;
         if (flowNetwork.excess[fStart + t] == (double) totalCliques * k) {
+
+            // At max the connected component has alpha max density
             upperBound[i] = alpha;
         } else {
+
+            // At least the connected component has alpha min density
             lowerBound[i] = alpha;
+            checkResult[i] = 1;
 
         }
         if ((upperBound[i] - lowerBound[i]) > bais) {
+            // still needs to search for maximum density
             atomicAdd(componenetsLeft, 1);
 
         }
@@ -1509,7 +1550,7 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceCompone
       __syncwarp();
 
 
-      //Update the network
+      //Update the network based on new alpha
       if ((upperBound[i] - lowerBound[i]) > bais){
             double alpha = (upperBound[i] + lowerBound[i]) / 2;
             for (ui j = laneId; j < total; j += warpSize){
@@ -1525,7 +1566,7 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceCompone
 
   }
 }
-__global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, deviceCliquesPointer finalCliqueData, ui *compCounter,  double * upperBound, double * lowerBound, double *densities,ui totalWarps, int totalComponents, ui k,ui t) {
+__global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, deviceCliquesPointer finalCliqueData, ui *compCounter,  double * upperBound, double * lowerBound, double *densities,ui *checkResult, ui totalWarps, int totalComponents, ui k,ui t) {
   extern __shared__ char sharedMemory[];
   ui sizeOffset = 0;
 
@@ -1544,10 +1585,9 @@ __global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponent
 
     ui tFlow = total + totalCliques +2;
 
-    double bais = 1.0 / (tFlow * (tFlow - 1));
 
 
-    if (((upperBound[i] - lowerBound[i]) < bais)&&(upperBound[i]!=0)&&(lowerBound[i]!=0)) {
+    if (checkResult[i]) {
 
         ui fStart = flowNetwork.offset[i];
         ui neighborOffset = flowNetwork.neighborOffset2[fStart+total+totalCliques];
