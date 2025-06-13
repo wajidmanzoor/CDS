@@ -1259,7 +1259,7 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
 
             ui vertexOffset = flowNetwork.offset[i];
 
-            double alpha = upperBound[i]/lb;
+            double alpha = (upperBound[i]+lb)/2;
 
 
             for (ui j = laneId; j < total; j += warpSize){
@@ -1277,7 +1277,7 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
 
                 ui vertex = conComp.mapping[start+j];
 
-                ui cliqueDegree = flowNetwork.neighborOffset2[vertexOffset+j + 1] - flowNetwork.neighborOffset2[vertexOffset+j];
+                ui cliqueDegree = ((flowNetwork.neighborOffset2[vertexOffset+j + 1] - flowNetwork.neighborOffset2[vertexOffset+j])/2)-1;
 
 
                 ui temp= 2;
@@ -1351,222 +1351,238 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork, deviceC
     }
  }
 
-__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui * compCounter, double * upperBound, double * lowerBound, ui * activeNodes, ui * componenetsLeft, ui *checkResult,ui totalWarps, int totalComponents, ui k,ui t, ui partitionSize) {
-  /* Applies push relabel algorithm of flow network of each connected component.
-    One warp process flownetwork of a connected compoenent.*/
-  
+__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, densestCorePointer densestCore, deviceCliquesPointer finalCliqueData, ui * compCounter, double * upperBound, double * lowerBound, ui * activeNodes, ui * componenetsLeft, ui * checkResult, ui totalWarps, int totalComponents, ui k, ui t, ui partitionSize) {
     extern __shared__ char sharedMemory[];
     ui sizeOffset = 0;
 
     ui * counter = (ui * )(sharedMemory + sizeOffset);
 
+    // += WARPS_EACH_BLK * sizeof(ui);
+    //sizeOffset = (sizeOffset + alignof(double) - 1) & ~(alignof(double) - 1);
+    //ui *densities = (ui *)(sharedMemory + sizeOffset);
+
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int warpId = idx / warpSize;
     int laneId = idx % warpSize;
 
-  for (ui i = warpId; i < totalComponents; i += totalWarps) {
-    ui start = conComp.componentOffset[i];
-    ui end = conComp.componentOffset[i + 1];
-    ui total = end - start;
+    for (ui i = warpId; i < totalComponents; i += totalWarps) {
+        ui start = conComp.componentOffset[i];
+        ui end = conComp.componentOffset[i + 1];
+        ui total = end - start;
 
-    ui cliqueStart = compCounter[i];
-    ui cliqueEnd = compCounter[i + 1];
-    ui totalCliques = cliqueEnd - cliqueStart;
+        ui cliqueStart = compCounter[i];
+        ui cliqueEnd = compCounter[i + 1];
+        ui totalCliques = cliqueEnd - cliqueStart;
 
-    ui fStart = flowNetwork.offset[i];
+        ui fStart = flowNetwork.offset[i];
 
-    ui tFlow = totalCliques + total + 2;
+        ui tFlow = totalCliques + total + 2;
 
-    double bais = 1.0 / (tFlow * (tFlow - 1));
-    if(bais<0.000000000000001){
-			bais=0.000000000000001;
-	}
-
-    // if difference greater than bais
-    if ((upperBound[i] - lowerBound[i]) > bais) {
-
-
-      ui s = tFlow - 2;
-      ui t = tFlow - 1;
-
-      //Set Height to 0 expect for source set to total nodes in flownetwork
-      for (ui j = laneId; j < tFlow; j += warpSize) {
-        flowNetwork.height[fStart + j] = (j == s) ? tFlow : 0;
-        flowNetwork.excess[fStart + j] = 0;
-
-      }
-      __syncwarp();
-
-      // Send Intial flow for source to all verticies (flooding)
-      for (ui j = laneId; j < total; j += warpSize) {
-        ui nStart = flowNetwork.neighborOffset2[fStart + totalCliques + total];
-        ui neigh = flowNetwork.Edges[nStart + j];
-        double cap = flowNetwork.capacity[nStart + j];
-
-        //Forward Flow source to vertex
-        flowNetwork.flow[nStart + j] = cap;
-        atomicAdd( & flowNetwork.excess[fStart + neigh], cap);
-
-        //BackwardFlow vertex to source
-        flowNetwork.flow[flowNetwork.neighborOffset2[fStart + neigh] + 1] = -cap;
-
-      }
-
-      __syncwarp();
-
-      int maxIterations = 1000;
-
-
-      //Push or Relabel until converge
-      for (int iter = 0; iter < maxIterations; iter++) {
-        if (laneId == 0) {
-          counter[threadIdx.x / warpSize] = 0;
+        double bais = 1.0 / (tFlow * (tFlow - 1));
+        if (bais < 0.0001) {
+        bais = 0.0001;
         }
-        __syncwarp();
 
-        //check for nodes with excess, if excess write in active nodes
+        if ((upperBound[i] - lowerBound[i]) > bais) {
+
+        ui s = tFlow - 2;
+        ui t = tFlow - 1;
+
+        //Set Height to 0 expect for s to total
         for (ui j = laneId; j < tFlow; j += warpSize) {
-          if (j != s && j != t && flowNetwork.excess[fStart + j] > 0) {
-            int pos = atomicAdd( & counter[threadIdx.x / warpSize], 1);
-            if (pos < partitionSize) {
-              activeNodes[i * partitionSize + pos] = j;
-            }
+            flowNetwork.height[fStart + j] = (j == s) ? tFlow : 0;
+            flowNetwork.excess[fStart + j] = 0;
 
-          }
         }
         __syncwarp();
-        bool should_break = (counter[threadIdx.x / warpSize] == 0);
-        __syncwarp();  // Sync before any thread exits
 
-        if (should_break) break;
+        // Send Intial flow for s to all v
+        for (ui j = laneId; j < total; j += warpSize) {
+            ui nStart = flowNetwork.neighborOffset2[fStart + totalCliques + total];
+            ui neigh = flowNetwork.Edges[nStart + j];
+            double cap = flowNetwork.capacity[nStart + j];
 
-        bool pushed = false;
+            //Forward Flow s to vertex
+            flowNetwork.flow[nStart + j] = cap;
+            atomicAdd( & flowNetwork.excess[fStart + neigh], cap);
 
-        // Iter through active nodes
-        for (ui j = laneId; j < counter[threadIdx.x / warpSize]; j += warpSize) {
-          ui vertex = activeNodes[i * partitionSize + j];
+            //BackwardFlow vertex to s
+            flowNetwork.flow[flowNetwork.neighborOffset2[fStart + neigh] + 1] = -cap;
 
-          ui nStart = flowNetwork.neighborOffset2[fStart + vertex];
-          ui nEnd = flowNetwork.neighborOffset2[fStart + vertex + 1];
+        }
 
-        // iter through their neighbors sequentially
-          for (ui x = nStart; x < nEnd; x++) {
-          
-            ui neigh = flowNetwork.Edges[x];
-            double residual = flowNetwork.capacity[x] - flowNetwork.flow[x];
+        __syncwarp();
 
+        int maxIterations = 1000;
+
+        //printf("warpid %d laneid %d\n ", warpId,laneId);
+
+        //Push or Relabel until converge
+        for (int iter = 0; iter < maxIterations; iter++) {
+            if (laneId == 0) {
+                counter[threadIdx.x / warpSize] = 0;
+                //printf("reset iter %d warp %d c %d\n", iter, warpId, counter[threadIdx.x / warpSize]);
+            }
 
             __syncwarp();
 
-            // If neighbor has capacity, and heigh condition is met
-            if ((flowNetwork.height[fStart + vertex] == flowNetwork.height[fStart + neigh] + 1) && residual > 0) {
 
+            //check for nodes with excess
+            for (ui j = laneId; j < tFlow; j += warpSize) {
+                if ((j != s) && (j != t) && (flowNetwork.excess[fStart + j] > 1e-10)) {
+                    int pos = atomicAdd( & counter[threadIdx.x / warpSize], 1);
+                    activeNodes[i * partitionSize + pos] = j;
+                }
+            }
 
-              double delta = min(flowNetwork.excess[fStart + vertex], residual);
-              if (delta > 0) {
+            __syncwarp(); // Ensure all threads have the latest counter value
 
-                //forward flow vertex to neigh
-                atomicAdd( & flowNetwork.flow[x], delta);
+            bool should_break = (counter[threadIdx.x / warpSize] == 0);
+            //printf("iter %d warpId %d laneid %d c %d  should_break %d \n", iter, warpId, laneId,counter[threadIdx.x / warpSize],should_break);
 
-                //Backward Flow neigh to vertex
-                ui stemp = flowNetwork.neighborOffset2[fStart + neigh];
-                ui etemp = flowNetwork.neighborOffset2[fStart + neigh + 1];
-                for (ui ind = stemp; ind < etemp; ind++) {
-                  if (flowNetwork.Edges[ind] == vertex) {
-                    atomicAdd( & flowNetwork.flow[ind], -delta);
+            unsigned mask = __ballot_sync(0xFFFFFFFF, should_break);
+            if (mask == 0xFFFFFFFF) {  // All threads agree we should break
+
+                //printf("break iter %d warpId %d lane %d  c %d \n", iter, warpId,laneId, counter[threadIdx.x / warpSize]);
+
+                break;
+            }
+
+            bool pushed = false;
+
+            for (ui j = laneId; j < counter[threadIdx.x / warpSize]; j += warpSize) {
+                ui vertex = activeNodes[i * partitionSize + j];
+
+                ui nStart = flowNetwork.neighborOffset2[fStart + vertex];
+                ui nEnd = flowNetwork.neighborOffset2[fStart + vertex + 1];
+
+                //Check neighbors to send acess to.
+                for (ui x = nStart; x < nEnd; x++) {
+                    //
+                    /*if (flowNetwork.excess[fStart + vertex] == 0) {
                     break;
-                  }
+                    }*/
+                    ui neigh = flowNetwork.Edges[x];
+                    double residual = flowNetwork.capacity[x] - flowNetwork.flow[x];
+
+                    // __syncwarp();
+
+                    // If neighbor has capacity
+                    if ((flowNetwork.height[fStart + vertex] == flowNetwork.height[fStart + neigh] + 1) && residual > 0) {
+
+                        //printf("warp Id %d laneid %d vertex %d nstart %d end %d neigh %d resi %f cap %f flow %f loc %d hv %d hu %d ev %f en %f \n", i, j, vertex, nStart, nEnd, neigh, residual, flowNetwork.capacity[x], flowNetwork.flow[x], x, flowNetwork.height[fStart + vertex], flowNetwork.height[fStart + neigh], flowNetwork.excess[fStart + vertex], flowNetwork.excess[fStart + neigh]);
+
+                        double delta = min(flowNetwork.excess[fStart + vertex], residual);
+                        if (delta > 1e-10) {
+
+                            //forward flow vertex to neigh
+                            atomicAdd( & flowNetwork.flow[x], delta);
+
+                            //Backward Flow neigh to vertex
+                            ui stemp = flowNetwork.neighborOffset2[fStart + neigh];
+                            ui etemp = flowNetwork.neighborOffset2[fStart + neigh + 1];
+                            for (ui ind = stemp; ind < etemp; ind++) {
+                                if (flowNetwork.Edges[ind] == vertex) {
+                                    atomicAdd( & flowNetwork.flow[ind], -delta);
+                                    //break;
+                                }
+                            }
+
+                            //Decrease vertex excess
+                            atomicAdd( & flowNetwork.excess[fStart + vertex], -delta);
+
+                            //Increase neighbor excess
+                            atomicAdd( & flowNetwork.excess[fStart + neigh], delta);
+                            pushed = true;
+
+                        }
+                        // printf("after -- warp Id %d laneid %d vertex %d nstart %d end %d neigh %d resi %f cap %f flow %f loc %d hv %d hu %d ev %f en %f \n", i, j, vertex, nStart, nEnd, neigh, residual, flowNetwork.capacity[x], flowNetwork.flow[x], x, flowNetwork.height[fStart + vertex], flowNetwork.height[fStart + neigh], flowNetwork.excess[fStart + vertex], flowNetwork.excess[fStart + neigh]);
+
+                    }
+
                 }
 
-                //Decrease vertex excess
-                atomicAdd( & flowNetwork.excess[fStart + vertex], -delta);
+                //__syncwarp();
 
-                //Increase neighbor excess
-                atomicAdd( & flowNetwork.excess[fStart + neigh], delta);
-                pushed = true;
+                // Relabel
+                if (!pushed && flowNetwork.excess[fStart + vertex] > 0) {
+                    ui minHeight = UINT_MAX;
+                    //printf("Relabel  WarpId %d laneid %d vertex %d excess %f height %d nstart %d end %d \n", i, laneId, vertex, flowNetwork.excess[fStart + vertex], flowNetwork.height[fStart + vertex], nStart, nEnd);
+                    for (ui x = nStart; x < nEnd; x++) {
+                    ui neigh = flowNetwork.Edges[x];
+                    double residual = flowNetwork.capacity[x] - flowNetwork.flow[x];
+                    //printf("warp %d laneid %d j %d v %d res %f negh %d height %d nstart %d \n", i, laneId, j, vertex, residual, neigh, flowNetwork.height[fStart + neigh], nStart);
 
-              }
+                    if (residual > 1e-10) {
+                        minHeight = (flowNetwork.height[fStart + neigh] < minHeight) ? flowNetwork.height[fStart + neigh] : minHeight;
+                    }
 
-            }
+                    }
+                    if (minHeight != UINT_MAX) {
+                    flowNetwork.height[fStart + vertex] = minHeight + 1;
 
-          }
+                    }
 
-          __syncwarp();
+                    //printf("after Relabel  WarpId %d laneid %d vertex %d excess %f height %d minHeight %d \n", i, laneId, vertex, flowNetwork.excess[fStart + vertex], flowNetwork.height[fStart + vertex], minHeight);
 
-          // Relabel if not pushed 
-          if (!pushed && flowNetwork.excess[fStart + vertex] > 0) {
-            ui minHeight = UINT_MAX;
-
-            // Find minimum height among all neighbors
-            for (ui x = nStart; x < nEnd; x++) {
-              ui neigh = flowNetwork.Edges[x];
-              double residual = flowNetwork.capacity[x] - flowNetwork.flow[x];
-
-              if (residual > 0.0) {
-                minHeight = (flowNetwork.height[fStart + neigh] < minHeight) ? flowNetwork.height[fStart + neigh] : minHeight;
-              }
+                }
 
             }
 
-            // set new height of node
-            if (minHeight != INF) {
-              flowNetwork.height[fStart + vertex] = minHeight + 1;
-
-            }
+            __syncwarp();
 
 
-          }
-          __syncwarp();
+
+
         }
 
-      }
-
-      __syncwarp();
+        __syncwarp();
 
 
+        //printf("second warpid %d laneid %d\n ", warpId,laneId);
 
-      if(laneId==0){
-        // Adjust lower and upper bound based on max flow
-        double alpha = (upperBound[i] + lowerBound[i]) / 2;
-        if (flowNetwork.excess[fStart + t] == (double) totalCliques * k) {
+        if (laneId == 0) {
+            //getRes[threadIdx.x / warpSize] = 0;
+            double alpha = (upperBound[i] + lowerBound[i]) / 2;
+            double temp = totalCliques * k;
 
-            // At max the connected component has alpha max density
-            upperBound[i] = alpha;
-        } else {
+            //printf("Warp %d lane %d excess %f temp %f \n",warpId,laneId,flowNetwork.excess[fStart + t],temp);
+             double epsilon = 1e-3;
+            if (fabs(flowNetwork.excess[fStart + t] - temp) < epsilon) {
+              upperBound[i] = alpha;
+              //printf("up here");
+            } else {
+              lowerBound[i] = alpha;
+              checkResult[i] = 1;
+              //printf("lb here");
 
-            // At least the connected component has alpha min density
-            lowerBound[i] = alpha;
-            checkResult[i] = 1;
-
-        }
-        if ((upperBound[i] - lowerBound[i]) > bais) {
-            // still needs to search for maximum density
+            }
+            if ((upperBound[i] - lowerBound[i]) > bais) {
             atomicAdd(componenetsLeft, 1);
 
-        }
-
-      }
-
-      __syncwarp();
-
-
-      //Update the network based on new alpha
-      if ((upperBound[i] - lowerBound[i]) > bais){
-            double alpha = (upperBound[i] + lowerBound[i]) / 2;
-            for (ui j = laneId; j < total; j += warpSize){
-                ui neighborOffset = flowNetwork.neighborOffset2[fStart+j];
-                flowNetwork.capacity[neighborOffset] = alpha * k;
-
-
             }
 
-      }
+        }
+
+        __syncwarp();
+
+        //Update the network
+        if ((upperBound[i] - lowerBound[i]) > bais){
+                double alpha = (upperBound[i] + lowerBound[i]) / 2;
+                for (ui j = laneId; j < total; j += warpSize){
+                    ui neighborOffset = flowNetwork.neighborOffset2[fStart+j];
+                    flowNetwork.capacity[neighborOffset] = alpha * k;
+
+
+                }
+
+        }
+
+        }
 
     }
-
-  }
 }
-__global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, deviceCliquesPointer finalCliqueData, ui *compCounter,  double * upperBound, double * lowerBound, double *densities,ui *checkResult, ui totalWarps, int totalComponents, ui k,ui t) {
+__global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, deviceCliquesPointer finalCliqueData, ui *compCounter,  double * upperBound, double * lowerBound, double *densities, ui *checkResult, ui totalWarps, int totalComponents, ui k,ui t) {
   extern __shared__ char sharedMemory[];
   ui sizeOffset = 0;
 
@@ -1585,6 +1601,7 @@ __global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponent
 
     ui tFlow = total + totalCliques +2;
 
+    double bais = 1.0 / (tFlow * (tFlow - 1));
 
 
     if (checkResult[i]) {
@@ -1596,7 +1613,7 @@ __global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponent
             size[threadIdx.x/warpSize] =0;
         }
          __syncwarp();
-        
+
         for(ui j = laneId; j < total; j+=warpSize){
             double residual = flowNetwork.capacity[neighborOffset+ j] - flowNetwork.flow[neighborOffset+j];
             if(residual>0){
@@ -1634,7 +1651,9 @@ __global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponent
             }else{
               densities[i]= densities[i]/size[threadIdx.x/warpSize];
             }
-        
+            //printf("warp %d size %d density %f \n",warpId,size[threadIdx.x/warpSize],densities[i]);
+
+
 
         }
          __syncwarp();
@@ -1643,5 +1662,3 @@ __global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponent
   }
 }
 }
-
-
