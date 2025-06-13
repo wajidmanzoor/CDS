@@ -196,12 +196,22 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
 
     chkerr(cudaFree(labels));
 
-    // Stores Final k-cliques of the graph.
-    memoryAllocationTrie(cliqueData, t, k);
-
-    // Used to get next memory location to write a clique
+    
+    // Total Cliques
     ui *totalCliques;
     chkerr(cudaMalloc((void**)&totalCliques, sizeof(ui)));
+    chkerr(cudaMemset(totalCliques, 0, sizeof(ui)));
+
+    countCliques<<<BLK_NUMS, BLK_DIM>>>(deviceDAG,  levelData, totalCliques,  maxBitMask ,totalTasks, TOTAL_WARPS);
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Count Num Cliques");
+
+    // Total Cliques
+    ui tt;
+    chkerr(cudaMemcpy(&tt, totalCliques, sizeof(ui), cudaMemcpyDeviceToHost));
+    // Stores Final k-cliques of the graph.
+    memoryAllocationTrie(cliqueData, tt, k);
+
     chkerr(cudaMemset(totalCliques, 0, sizeof(ui)));
 
     size_t sharedMemoryFinal =  WARPS_EACH_BLK * sizeof(ui);
@@ -214,7 +224,7 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
     if(iterK == 2) {
 
         // Write final k-cliques based on the partial cliques to global memory.
-        writeFinalCliques<<<BLK_NUMS, BLK_DIM,sharedMemoryFinal>>>(deviceGraph, deviceDAG, levelData, cliqueData, totalCliques, k, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, t,totalTasks, level, TOTAL_WARPS);
+        writeFinalCliques<<<BLK_NUMS, BLK_DIM,sharedMemoryFinal>>>(deviceGraph, deviceDAG, levelData, cliqueData, totalCliques, k, iterK, graph.n, graph.m, pSize, cpSize, maxBitMask, tt,totalTasks, level, TOTAL_WARPS);
         cudaDeviceSynchronize();
         CUDA_CHECK_ERROR("Generate Full Cliques");
 
@@ -271,8 +281,7 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
     }
     
     // Actual total cliques in the graph.
-    ui tt;
-    chkerr(cudaMemcpy(&tt, totalCliques, sizeof(ui), cudaMemcpyDeviceToHost));
+    
     
     freeLevelData(levelData);
     freeLevelPartitionData(levelData);
@@ -653,7 +662,7 @@ int componentDecompose(deviceComponentPointers &conComp,devicePrunedNeighbors &p
 }
 
 int main(int argc, const char * argv[]) {
-    if (argc != 9) {
+    if (argc != 8) {
         cout << "Server wrong input parameters!" << endl;
         exit(1);
     }
@@ -665,7 +674,7 @@ int main(int argc, const char * argv[]) {
     ui cpSize = atoi(argv[5]);  // Virtual Partition size for storing Candidates of PC in Listing Algorithm
     ui glBufferSize = atoi(argv[6]);  // Buffer to store the vertices that need to be removed in clique core decompose peeling algorithm 
     ui partitionSize = atoi(argv[7]); // Virtual Partition to store the active node of each flownetwork
-    ui t = atoi(argv[8]);             // Total Number of cliques.
+    //ui t = atoi(argv[8]);             // Total Number of cliques.
 
     if(DEBUG){
         cout << "filepath: " << filepath << endl;

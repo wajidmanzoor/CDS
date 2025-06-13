@@ -436,7 +436,7 @@ __global__ void listMidCliques(deviceDAGpointer D, cliqueLevelDataPointer levelD
 
 }
 
-__global__ void countCliques(ddeviceDAGpointer D, cliqueLevelDataPointer levelData,  ui *globalCounter, ui maxBitMask ,ui totalTasks, ui totalWarps){
+__global__ void countCliques(deviceDAGpointer D, cliqueLevelDataPointer levelData,  ui *globalCounter, ui maxBitMask ,ui totalTasks, ui totalWarps){
     /* Find Total number of cliques in the graph by counting the valid neighbors.
        Each warp processes on partial clique. */
 
@@ -452,7 +452,7 @@ __global__ void countCliques(ddeviceDAGpointer D, cliqueLevelDataPointer levelDa
 
         int count = 0;
 
-        for(int j = laneId, j <totalCandidates; j+=warpSize){
+        for(int j = laneId; j <totalCandidates; j+=warpSize){
             int degree = D.degree[levelData.candidates[start + j]];
             int numBitmasks = (degree + 31) / 32;
             for(int x =0; x <numBitmasks; x++){
@@ -479,7 +479,6 @@ __global__ void countCliques(ddeviceDAGpointer D, cliqueLevelDataPointer levelDa
     }
 
 }
-
 
 
 __global__ void writeFinalCliques(deviceGraphPointers G, deviceDAGpointer D, cliqueLevelDataPointer levelData, deviceCliquesPointer cliqueData, ui *globalCounter,ui k,ui iterK, ui n, ui m,ui pSize, ui cpSize, ui maxBitMask,ui trieSize,ui totalTasks, ui level, ui totalWarps){
