@@ -436,6 +436,52 @@ __global__ void listMidCliques(deviceDAGpointer D, cliqueLevelDataPointer levelD
 
 }
 
+__global__ void countCliques(ddeviceDAGpointer D, cliqueLevelDataPointer levelData,  ui *globalCounter, ui maxBitMask ,ui totalTasks, ui totalWarps){
+    /* Find Total number of cliques in the graph by counting the valid neighbors.
+       Each warp processes on partial clique. */
+
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int warpId = idx / warpSize;
+    int laneId = idx % warpSize;
+
+    for(int i =warpId; i < totalTasks ; i+= totalWarps ){
+
+        // candidate offset
+        int start = levelData.offset[i];
+        int totalCandidates = levelData.offset[i+1]- start;
+
+        int count = 0;
+
+        for(int j = laneId, j <totalCandidates; j+=warpSize){
+            int degree = D.degree[levelData.candidates[start + j]];
+            int numBitmasks = (degree + 31) / 32;
+            for(int x =0; x <numBitmasks; x++){
+                int neighBitMask = levelData.validNeighMask[(start+j)*maxBitMask + x];
+                count += __popc(neighBitMask);
+
+            }
+
+        }
+
+        __syncwarp();
+
+         for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+                count += __shfl_down_sync(0xFFFFFFFF, count, offset);
+        }
+
+        if(laneId==0){
+            atomicAdd(globalCounter,count);
+
+        }
+
+        
+
+    }
+
+}
+
+
+
 __global__ void writeFinalCliques(deviceGraphPointers G, deviceDAGpointer D, cliqueLevelDataPointer levelData, deviceCliquesPointer cliqueData, ui *globalCounter,ui k,ui iterK, ui n, ui m,ui pSize, ui cpSize, ui maxBitMask,ui trieSize,ui totalTasks, ui level, ui totalWarps){
     /* Write final k-cliques from k-2 partial cliques.
        Each warp processes on partial clique. */
