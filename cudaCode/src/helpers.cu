@@ -626,10 +626,14 @@ __global__ void selectNodes(deviceGraphPointers G, ui *bufTails,ui *glBuffers, u
     __syncthreads();
 
     ui idx = blockIdx.x * blockDim.x + threadIdx.x;
+    //ui total = (n+BLK_NUMS)/BLK_NUMS;
+    //ui start = total*blockIdx.x;
+
 
     // iter through the verticies
-    for(ui i = idx ;i<n; i+=BLK_DIM){
-      ui v = i;
+    for(unsigned int base = 0; base < n; base += TOTAL_THREAD){
+      ui v = base + idx;
+      if(v >= n) continue;
       // if core value is equal to level.
       if(G.cliqueCore[v] == level){
 
@@ -687,6 +691,8 @@ __global__ void processNodesByWarp(deviceGraphPointers G,deviceCliquesPointer cl
             if(regTail < base )
             base = regTail;
         }
+        __syncthreads();
+
 
         //vertex to be removed
         ui v = glBuffer[i];
@@ -1627,6 +1633,7 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork, deviceCompone
 
     }
 }
+
 __global__ void getResult(deviceFlowNetworkPointers flowNetwork, deviceComponentPointers conComp, deviceCliquesPointer finalCliqueData, ui *compCounter,  double * upperBound, double * lowerBound, double *densities, ui *checkResult, ui totalWarps, int totalComponents, ui k,ui t) {
   extern __shared__ char sharedMemory[];
   ui sizeOffset = 0;
