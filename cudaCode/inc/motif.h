@@ -1,18 +1,17 @@
 #pragma once
 #include "common.h"
 
-class Motif{
+class Motif {
 
-    public:
-        ui size;
-        ui count;
-        ui type;
-        string path;
+public:
+  ui size;
+  ui count;
+  ui type;
+  string path;
 
-    public:
-        vector<vector<ui>> *adjMatrix;
+public:
+  vector<vector<ui>> *adjMatrix;
 
-
-    Motif(string filepath);
-    Motif();
+  Motif(string filepath);
+  Motif();
 }
