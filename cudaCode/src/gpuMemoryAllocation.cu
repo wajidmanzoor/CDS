@@ -115,7 +115,7 @@ ui memoryAllocationlevelData(cliqueLevelDataPointer &L, ui k, ui pSize, ui cpSiz
     return maxBitMask;
 }
 
-void memoryAllocationDensestCore(densestCorePointer &C, ui n, ui density, ui totalCliques){
+void memoryAllocationDensestCore(densestCorePointer &C, ui n, ui density, ui totalCliques, ui graphsize){
 
     chkerr(cudaMalloc((void**)&(C.mapping), n* sizeof(ui)));
 
@@ -136,7 +136,7 @@ void memoryAllocationDensestCore(densestCorePointer &C, ui n, ui density, ui tot
     chkerr(cudaMalloc((void**)&(C.totalCliques), sizeof(ui)));
     chkerr(cudaMemcpy(C.totalCliques, &totalCliques, sizeof(ui), cudaMemcpyHostToDevice));
 
-    chkerr(cudaMalloc((void**)&(C.reverseMap), n * sizeof(ui)));
+    chkerr(cudaMalloc((void**)&(C.reverseMap), graphsize * sizeof(ui)));
     cudaDeviceSynchronize();
 
 
@@ -153,6 +153,11 @@ void memoryAllocationPrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors, ui
 }
 
 
+void freePrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors){
+    chkerr(cudaFree(prunedNeighbors.newOffset));
+    chkerr(cudaFree(prunedNeighbors.newNeighbors));
+    chkerr(cudaFree(prunedNeighbors.pruneStatus));
+}
 
 void memoryAllocationFlowNetwork(deviceFlowNetworkPointers &flowNetwork, ui vertexSize, ui neighborSize, ui totalComponents){
 
@@ -244,10 +249,5 @@ void freeDensestCore(densestCorePointer &C){
 
 }
 
-void freePrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors){
-    chkerr(cudaFree(prunedNeighbors.newOffset));
-    chkerr(cudaFree(prunedNeighbors.newNeighbors));
-    chkerr(cudaFree(prunedNeighbors.pruneStatus));
-}
 
 

@@ -12,7 +12,7 @@ void memoryAllocationComponent(deviceComponentPointers &C, ui n, ui m);
 void memoryAllocationresult(deviceResultpointer &R, ui n);
 void memoryAllocationTrie(deviceCliquesPointer &C, ui t, ui k);
 ui memoryAllocationlevelData(cliqueLevelDataPointer &L, ui k, ui pSize, ui cpSize, ui maxDegree, ui totalWarps);
-void memoryAllocationDensestCore(densestCorePointer &C, ui n, ui density, ui totalCliques);
+void memoryAllocationDensestCore(densestCorePointer &C, ui n, ui density, ui totalCliques, ui graphsize);
 
 void memoryAllocationPrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors, ui n, ui m);
 

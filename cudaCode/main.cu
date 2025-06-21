@@ -19,12 +19,6 @@
 
 bool DEBUG = false;
 
-__global__ void printmap(densestCorePointer densestCore, ui coreSize){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if(idx<coreSize){
-    printf("idx %d map %d \n",idx,densestCore.mapping[idx]);
-  }
-}
 
 void generateDAG(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGpointer& deviceDAG , vector<ui> listingOrder){
 
@@ -89,15 +83,13 @@ void generateDAG(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGpo
 
 
     }
-    
-
 
     chkerr(cudaFree(listOrder));
 
 
 }
 
-ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGpointer& deviceDAG,cliqueLevelDataPointer levelData, ui k, ui pSize,ui  cpSize, ui t){
+ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGpointer& deviceDAG,cliqueLevelDataPointer levelData, ui k, ui pSize,ui  cpSize){
     /* Listing all k cliques of a graph using Bron–Kerbosch Algorithm.
     */
 
@@ -218,9 +210,12 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
 
     // Set status to of each clique to -2, representing not a valid clique.
     thrust::device_ptr<int> dev_ptr(cliqueData.status);
-    thrust::fill(dev_ptr, dev_ptr + t, -2);
+    thrust::fill(dev_ptr, dev_ptr + tt, -2);
 
-    chkerr(cudaMemset(cliqueData.trie, 0, t * k * sizeof(ui)));
+    chkerr(cudaMemset(cliqueData.trie, 0, tt* k * sizeof(ui)));
+
+    freeLevelPartitionData(levelData);
+
     if(iterK == 2) {
 
         // Write final k-cliques based on the partial cliques to global memory.
@@ -232,21 +227,21 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
 
     if(DEBUG){
         ui *h_cliques,*status;
-        h_cliques = new ui[t*k];
-        status = new ui[t];
-        chkerr(cudaMemcpy(h_cliques, cliqueData.trie, k * t * sizeof(ui), cudaMemcpyDeviceToHost));
-        chkerr(cudaMemcpy(status, cliqueData.status, t * sizeof(ui), cudaMemcpyDeviceToHost));
+        h_cliques = new ui[tt*k];
+        status = new ui[tt];
+        chkerr(cudaMemcpy(h_cliques, cliqueData.trie, k * tt * sizeof(ui), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(status, cliqueData.status, tt * sizeof(ui), cudaMemcpyDeviceToHost));
         cout<<endl;
 
         cout<<endl<<"Cliques Data "<<endl;
         for(int i =0;i<k;i++){
         cout<<endl<<"CL "<<i<<"  ";
-        for(int j =0;j<t;j++){
-            cout<<h_cliques[i*t+j]<<" ";
+        for(int j =0;j<tt;j++){
+            cout<<h_cliques[i*tt+j]<<" ";
         }
         }
         cout<<endl<<"stat  ";
-        for(int i = 0; i < t; i++) {
+        for(int i = 0; i < tt; i++) {
             cout << status[i] << " ";
 
         }
@@ -285,13 +280,14 @@ ui listAllCliques(const Graph& graph,deviceGraphPointers& deviceGraph,deviceDAGp
     
     freeLevelData(levelData);
     freeLevelPartitionData(levelData);
+
     freeDAG(deviceDAG);
 
     return tt;
 
 }
 
-void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,deviceCliquesPointer& cliqueData, ui &maxCore, double &maxDensity, ui &coreSize, ui &coreTotalCliques, ui glBufferSize, ui k, ui t, ui tt){
+void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,deviceCliquesPointer& cliqueData, ui &maxCore, double &maxDensity, ui &coreSize, ui &coreTotalCliques, ui glBufferSize, ui k, ui totalCliques){
     ui level = 0;
     ui count = 0;
     ui *globalCount = NULL;
@@ -313,10 +309,11 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
     // set clique core to clique degree
     chkerr(cudaMemcpy(deviceGraph.cliqueCore, deviceGraph.cliqueDegree, graph.n * sizeof(ui), cudaMemcpyDeviceToDevice));
 
-    thrust::device_vector<int> dev_vec(cliqueData.status, cliqueData.status + t);
+    
 
     // total cliques yet to be removed
-    ui currentCliques = thrust::count(dev_vec.begin(), dev_vec.end(), -1);
+    thrust::device_ptr<int> dev_ptr(cliqueData.status);
+    ui currentCliques = thrust::count(dev_ptr, dev_ptr + totalCliques, -1);
 
     double currentDensity = static_cast<double>(currentCliques) / (graph.n - count);
 
@@ -336,12 +333,12 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
 
 
         //Total number of verticies in buffer
-        thrust::device_vector<ui> dev_vec1(bufTails, bufTails + BLK_NUMS);
+        /*thrust::device_vector<ui> dev_vec1(bufTails, bufTails + BLK_NUMS);
         ui sum = thrust::reduce(dev_vec1.begin(), dev_vec1.end(), 0, thrust::plus<ui>());
-        cudaDeviceSynchronize();
+        cudaDeviceSynchronize();*/
 
         // Remove the verticies whose core value is current level and update clique degrees
-        processNodesByWarp<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, t, tt);
+        processNodesByWarp<<<BLK_NUMS, BLK_DIM>>>(deviceGraph, cliqueData , bufTails, glBuffers, globalCount, glBufferSize, graph.n, level, k, totalCliques);
         cudaDeviceSynchronize();
         CUDA_CHECK_ERROR("Process Node Core Decompose");
 
@@ -349,11 +346,12 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
         chkerr(cudaMemcpy(&count, globalCount, sizeof(unsigned int), cudaMemcpyDeviceToHost));
 
         level++;
-        thrust::device_vector<int> dev_vec2(cliqueData.status, cliqueData.status + t);
+        thrust::device_ptr<int> dev_ptr(cliqueData.status);
 
         // get the density of current core
        if((graph.n - count)!=0){
-        currentCliques = thrust::count(dev_vec2.begin(), dev_vec2.end(), -1);
+        currentCliques = thrust::count(dev_ptr, dev_ptr + totalCliques, -1);
+
         currentDensity = static_cast<double>(currentCliques) / (graph.n - count);
 
         // update max density 
@@ -376,10 +374,10 @@ void cliqueCoreDecompose(const Graph& graph,deviceGraphPointers& deviceGraph,dev
 
 }
 
-ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, densestCorePointer &densestCore, ui coreSize, ui coreTotalCliques, ui lowerBoundDensity){
+ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, densestCorePointer &densestCore, ui coreSize, ui coreTotalCliques, ui maxCore){
     
     // stores the densest core in the graph
-    memoryAllocationDensestCore(densestCore, coreSize, lowerBoundDensity , coreTotalCliques);
+    memoryAllocationDensestCore(densestCore, coreSize, maxCore , coreTotalCliques, graph.n);
 
     ui *globalCount;
 
@@ -387,7 +385,7 @@ ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, dens
     chkerr(cudaMemset(globalCount, 0, sizeof(ui)));
 
     // Generates densest core, remaps its verticies and calculates the new offset.
-    generateDensestCore<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,densestCore,globalCount,graph.n,lowerBoundDensity,TOTAL_WARPS);
+    generateDensestCore<<<BLK_NUMS, BLK_DIM>>>(deviceGraph,densestCore,globalCount,graph.n,maxCore,TOTAL_WARPS);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Generate Densest Core");
 
@@ -449,7 +447,7 @@ ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, dens
 
     size_t sharedMemoryGenNeighCore =  WARPS_EACH_BLK * sizeof(ui);
     // Generate remaped neighbor list of the densest core
-    generateNeighborDensestCore<<<BLK_NUMS, BLK_DIM,sharedMemoryGenNeighCore>>>(deviceGraph,densestCore,lowerBoundDensity,TOTAL_WARPS);
+    generateNeighborDensestCore<<<BLK_NUMS, BLK_DIM,sharedMemoryGenNeighCore>>>(deviceGraph,densestCore,maxCore,TOTAL_WARPS);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Generate Densest Core neighbors");
 
@@ -467,12 +465,14 @@ ui generateDensestCore(const Graph& graph,deviceGraphPointers& deviceGraph, dens
 
     }
 
+    chkerr(cudaFree(globalCount));
+
     return edgeCountCore;
 
 
 }
 ui prune(densestCorePointer &densestCore, deviceCliquesPointer &cliqueData, devicePrunedNeighbors &prunedNeighbors,
-    ui vertexCount, ui edgecount, ui k, ui t, ui tt, ui lowerBoundDensity) {
+    ui vertexCount, ui edgecount, ui k, ui totalCliques, ui lowerBoundDensity) {
 
     // Allocate and initialize pruneStatus
     thrust::device_ptr<ui> d_pruneStatus(prunedNeighbors.pruneStatus);
@@ -480,7 +480,7 @@ ui prune(densestCorePointer &densestCore, deviceCliquesPointer &cliqueData, devi
 
     // Kernel to determine pruning
 
-    pruneEdges<<<BLK_NUMS, BLK_DIM>>>(densestCore, cliqueData,prunedNeighbors.pruneStatus, t, tt, k, lowerBoundDensity);
+    pruneEdges<<<BLK_NUMS, BLK_DIM>>>(densestCore, cliqueData,prunedNeighbors.pruneStatus, totalCliques, k, lowerBoundDensity);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Get prune status of each edge");
 
@@ -741,40 +741,40 @@ int main(int argc, const char * argv[]) {
     generateDAG(graph,deviceGraph, deviceDAG,listingOrder);
 
     // List all k-cliques in the graph
-    ui tt = listAllCliques(graph, deviceGraph, deviceDAG, levelData, k, pSize, cpSize,t);
+    ui totalCliques = listAllCliques(graph, deviceGraph, deviceDAG, levelData, k, pSize, cpSize);
 
 
     ui coreSize, coreTotalCliques,maxCore;
     double maxDensity;
 
     // Peeling algorithm to get the k-clique core of each vertex.
-    cliqueCoreDecompose(graph,deviceGraph,cliqueData,maxCore, maxDensity, coreSize, coreTotalCliques,glBufferSize, k,  t, tt);
+    cliqueCoreDecompose(graph,deviceGraph,cliqueData,maxCore, maxDensity, coreSize, coreTotalCliques,glBufferSize, k, totalCliques);
 
     if(DEBUG){
         cout<<endl<<"Clique data after core decompose "<<endl;
         int *h_cliques,*status;
-        h_cliques = new int[t*k];
-        status = new int[t];
-        chkerr(cudaMemcpy(h_cliques, cliqueData.trie, k * t * sizeof(ui), cudaMemcpyDeviceToHost));
-        chkerr(cudaMemcpy(status, cliqueData.status, t * sizeof(ui), cudaMemcpyDeviceToHost));
+        h_cliques = new int[totalCliques*k];
+        status = new int[totalCliques];
+        chkerr(cudaMemcpy(h_cliques, cliqueData.trie, k * totalCliques * sizeof(ui), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(status, cliqueData.status, totalCliques * sizeof(ui), cudaMemcpyDeviceToHost));
         for(int i =0;i<k;i++){
         cout<<endl<<"CL "<<i<<"  ";
-        for(int j =0;j<t;j++){
-            cout<<h_cliques[i*t+j]<<" ";
+        for(int j =0;j<totalCliques;j++){
+            cout<<h_cliques[i*totalCliques+j]<<" ";
         }
         }
         cout<<endl<<"stat  ";
-        for(int i = 0; i < t; i++) {
+        for(int i = 0; i < totalCliques; i++) {
             cout << status[i] << " ";
 
         }
         cout<<endl;
     }
     
-    ui lowerBoundDensity = maxCore;
+    //ui lowerBoundDensity = maxCore;
  
     // Find the densest core in the graph.
-    ui edgecount = generateDensestCore(graph,deviceGraph,  densestCore, coreSize, coreTotalCliques,lowerBoundDensity);
+    ui edgecount = generateDensestCore(graph,deviceGraph,  densestCore, coreSize, coreTotalCliques,maxCore);
 
     ui vertexCount;
     chkerr(cudaMemcpy(&vertexCount, densestCore.n, sizeof(ui), cudaMemcpyDeviceToHost));
@@ -783,7 +783,7 @@ int main(int argc, const char * argv[]) {
     memoryAllocationPrunnedNeighbors(prunedNeighbors, vertexCount , edgecount);
 
     // Prune invalid edges i.e. edges that are not part of any clique.
-    ui newEdgeCount = prune(densestCore, cliqueData, prunedNeighbors, vertexCount, edgecount, k, t, tt, lowerBoundDensity);
+    ui newEdgeCount = prune(densestCore, cliqueData, prunedNeighbors, vertexCount, edgecount, k, totalCliques,maxCore);
 
     // Structure to store connected components
     memoryAllocationComponent(conComp, vertexCount , newEdgeCount);
@@ -808,7 +808,7 @@ int main(int argc, const char * argv[]) {
     chkerr(cudaMemset(compCounter, 0, (totalComponents+1) * sizeof(ui)));
 
     // Get total cliques of each connected components
-    getConnectedComponentStatus<<<BLK_NUMS, BLK_DIM>>>(conComp,cliqueData, densestCore,compCounter,t, tt,k, maxCore,TOTAL_THREAD);
+    getConnectedComponentStatus<<<BLK_NUMS, BLK_DIM>>>(conComp,cliqueData, densestCore,compCounter,totalCliques,k, maxCore,TOTAL_THREAD);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Calculate total cliques for each Component");
 
@@ -819,11 +819,11 @@ int main(int argc, const char * argv[]) {
         thrust::device_pointer_cast(compCounter));
 
 
-    ui totaLCliques;
-    chkerr(cudaMemcpy(&totaLCliques,compCounter+totalComponents,sizeof(ui),cudaMemcpyDeviceToHost));
+    ui newTotaLCliques;
+    chkerr(cudaMemcpy(&newTotaLCliques,compCounter+totalComponents,sizeof(ui),cudaMemcpyDeviceToHost));
 
     // Allocate memory for new clique data arranged my connected component
-    memoryAllocationTrie(finalCliqueData, totaLCliques, k);
+    memoryAllocationTrie(finalCliqueData, newTotaLCliques, k);
 
 
     ui *counter;
@@ -831,27 +831,27 @@ int main(int argc, const char * argv[]) {
     chkerr(cudaMemset(counter, 0, totalComponents * sizeof(ui)));
 
     // Rearrange cliques by connected component
-    rearrangeCliqueData<<<BLK_NUMS, BLK_DIM>>>(conComp, cliqueData,  finalCliqueData, densestCore, compCounter, counter, t,  tt,  k, totaLCliques,TOTAL_THREAD);
+    rearrangeCliqueData<<<BLK_NUMS, BLK_DIM>>>(conComp, cliqueData,  finalCliqueData, densestCore, compCounter, counter, totalCliques,  k, newTotaLCliques,TOTAL_THREAD);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Rearragne CLique Data");
 
     
     if(DEBUG){
         int *h_cliques,*status;
-        h_cliques = new int[t*k];
-        status = new int[t];
+        h_cliques = new int[newTotaLCliques*k];
+        status = new int[newTotaLCliques];
         cout<<endl<<"Clique data after rearange "<<endl;
-        chkerr(cudaMemcpy(h_cliques, finalCliqueData.trie, k * totaLCliques * sizeof(ui), cudaMemcpyDeviceToHost));
-        chkerr(cudaMemcpy(status, finalCliqueData.status, totaLCliques* sizeof(ui), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(h_cliques, finalCliqueData.trie, k * newTotaLCliques * sizeof(ui), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(status, finalCliqueData.status, newTotaLCliques* sizeof(ui), cudaMemcpyDeviceToHost));
 
         for(int i =0;i<k;i++){
         cout<<endl<<"CL "<<i<<"  ";
-        for(int j =0;j<totaLCliques;j++){
-            cout<<h_cliques[i*totaLCliques+j]<<" ";
+        for(int j =0;j<newTotaLCliques;j++){
+            cout<<h_cliques[i*newTotaLCliques+j]<<" ";
         }
         }
         cout<<endl<<"stat  ";
-        for(int i = 0; i < totaLCliques; i++) {
+        for(int i = 0; i < newTotaLCliques; i++) {
             cout << status[i] << " ";
 
         }
@@ -875,10 +875,10 @@ int main(int argc, const char * argv[]) {
                                0, thrust::maximum<int>());
 
     // Convert to double and return
-    double md =  static_cast<double>(max_int);
+    double maxDensity1 =  static_cast<double>(max_int);
 
     // Calculate upper bound and lower bound of density for each connected component.
-    getLbUbandSize<<<BLK_NUMS, BLK_DIM>>>( conComp, compCounter, lowerBound, upperBound, flowNetwork.offset, flowNetwork.neighborOffset1, totalComponents, k, md);
+    getLbUbandSize<<<BLK_NUMS, BLK_DIM>>>( conComp, compCounter, lowerBound, upperBound, flowNetwork.offset, flowNetwork.neighborOffset1, totalComponents, k, maxDensity1);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Get UB LU and Size");
 
@@ -945,7 +945,7 @@ int main(int argc, const char * argv[]) {
 
     //double just  = 1.0;
     // Calculate flow network offset for edges.
-    createFlowNetworkOffset<<<BLK_NUMS, BLK_DIM>>>( deviceGraph, flowNetwork, conComp, densestCore, finalCliqueData,   compCounter, upperBound,TOTAL_WARPS, totalComponents, k, max_lowerBound, totaLCliques);
+    createFlowNetworkOffset<<<BLK_NUMS, BLK_DIM>>>( deviceGraph, flowNetwork, conComp, finalCliqueData,   compCounter, upperBound,TOTAL_WARPS, totalComponents, k, max_lowerBound, newTotaLCliques);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Create Flow Network Offset");
 
@@ -969,7 +969,7 @@ int main(int argc, const char * argv[]) {
     }
     
     // create flow network ie. edges, capacities, flow etc
-    createFlowNetwork<<<BLK_NUMS, BLK_DIM>>>( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter,upperBound , TOTAL_WARPS, totalComponents, k, max_lowerBound , totaLCliques);
+    createFlowNetwork<<<BLK_NUMS, BLK_DIM>>>( flowNetwork,  conComp,  finalCliqueData, compCounter,upperBound , TOTAL_WARPS, totalComponents, k, max_lowerBound , newTotaLCliques);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Create Flow Network");
 
@@ -1048,14 +1048,14 @@ int main(int argc, const char * argv[]) {
       chkerr(cudaMemset(checkResult,0,totalComponents*sizeof(ui)));
 
       // Push relabel algorithm to solve a flow network
-      pushRelabel<<<BLK_NUMS, BLK_DIM,sharedMemorySize>>>( flowNetwork,  conComp,  densestCore,  finalCliqueData, compCounter,upperBound,lowerBound, activeNodes,componenetsLeft,checkResult,TOTAL_WARPS, totalComponents, k,totaLCliques, partitionSize);
+      pushRelabel<<<BLK_NUMS, BLK_DIM,sharedMemorySize>>>( flowNetwork,  conComp,  finalCliqueData, compCounter,upperBound,lowerBound, activeNodes,componenetsLeft,checkResult,TOTAL_WARPS, totalComponents, k,newTotaLCliques, partitionSize);
       cudaDeviceSynchronize();
       CUDA_CHECK_ERROR("Push Relabel");
 
       cudaMemcpy(&left,componenetsLeft,sizeof(ui),cudaMemcpyDeviceToHost);
       
       // calculate density of current densest subgraph.
-      getResult<<<BLK_NUMS, BLK_DIM,sharedMemorySize>>>( flowNetwork,  conComp,  finalCliqueData, compCounter, upperBound, lowerBound, densities, checkResult, TOTAL_WARPS, totalComponents, k, t);
+      getResult<<<BLK_NUMS, BLK_DIM,sharedMemorySize>>>( flowNetwork,  conComp,  finalCliqueData, compCounter, upperBound, lowerBound, densities, checkResult, TOTAL_WARPS, totalComponents, k, newTotaLCliques);
       cudaDeviceSynchronize();
       CUDA_CHECK_ERROR("Gather Results");
 
