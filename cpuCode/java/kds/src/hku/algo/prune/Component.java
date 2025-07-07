@@ -15,6 +15,7 @@ public class Component {
 	public double densest;
 	
 	public int[] motif_degree;
+	public int[] reverse_map;
 	
 	public Component(int[][] Graph,int graph_size,
 			Map<String,int[]> motif_list,long motif_num,double densest,int [] motif_degree) {
@@ -24,6 +25,16 @@ public class Component {
 		this.motif_num=motif_num;
 		this.densest=densest;
 		this.motif_degree=motif_degree;
+	}
+	public Component(int[][] Graph,int graph_size,
+			Map<String,int[]> motif_list,long motif_num,double densest,int [] motif_degree, int [] reverse_map) {
+		this.Graph=Graph;
+		this.graph_size=graph_size;
+		this.motif_list=motif_list;
+		this.motif_num=motif_num;
+		this.densest=densest;
+		this.motif_degree=motif_degree;
+		this.reverse_map = reverse_map;
 	}
 
 }

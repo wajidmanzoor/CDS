@@ -114,6 +114,12 @@ public class CDSdecompose {
 
 		motif_degree=array_degree;
 
+		System.out.println("Motif Degree");
+		for(int i=0;i<graph_size;i++){
+			System.out.print(motif_degree[i]+" ");
+		}
+		System.out.println();
+
 		//wm: copy of motif degree
 		long temp_degree[]=new long[graph_size];
 		for(int i=0;i<graph_size;++i) {
@@ -352,6 +358,7 @@ public class CDSdecompose {
 					}
 				}
 				
+				System.out.println("Removed " +index);
 
 				
 				
@@ -511,8 +518,15 @@ public class CDSdecompose {
 		for(int i=1;i<t_a.length;++i) {
 			if(t_a[i]>0)
 				result.put(map_array[i], t_a[i]);
+				System.out.println(map_array[i]);
+				System.out.println(t_a[i]);
+				System.out.println();
+
 		}
 
+
+		
+		
 		// wm: motif degree of each vertex in subgraph that is because of a motif that includes the desired vertex
 		return result;
 	}

@@ -27,7 +27,6 @@
 #include <sys/stat.h>
 #include <utility>
 
-
 #define BLK_NUMS 216
 #define BLK_DIM 1024
 #define TOTAL_THREAD (BLK_NUMS * BLK_DIM)
@@ -146,6 +145,20 @@ typedef struct {
 
 } deviceFlowNetworkPointers;
 
+typedef struct {
+  ui *height;
+  ui *excess;
+  ui *foffset;
+  ui *fneighbors;
+  ui *capacities;
+  ui *fflow;
+  ui *boffset;
+  ui *rneighbors;
+  ui *bflow;
+  ui *flowIndex;
+
+} deviceFlownetwork;
+
 extern deviceGraphPointers deviceGraph;
 extern deviceDAGpointer deviceDAG;
 extern cliqueLevelDataPointer levelData;
@@ -155,3 +168,4 @@ extern deviceComponentPointers conComp;
 extern devicePrunedNeighbors prunedNeighbors;
 extern deviceCliquesPointer finalCliqueData;
 extern deviceFlowNetworkPointers flowNetwork;
+extern deviceFlownetwork flownetwork;

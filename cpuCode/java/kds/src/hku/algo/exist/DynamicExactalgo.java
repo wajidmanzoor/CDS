@@ -49,11 +49,19 @@ public class DynamicExactalgo {
 		Exactalgo exact;
 		
 		//wm: stores the denset subgraph results
-		MDS mds=new MDS(null,index.motif_num,index.graph_size,low_bound);
+		int [] justTest = new int[index.graph_size];
+		for(int x =0; x<justTest.length;x++){
+			justTest[x] = x;
+		}
+		MDS mds=new MDS(justTest,index.motif_num,index.graph_size,low_bound);
+		mds.core = index;
 
 
 		//wm: iter over connected components
+		int wajid = 0;
 		while(!queue.isEmpty()) {
+			//System.out.println("component "+ wajid);
+			wajid++;
 
 			//wm: connected component
 			C=queue.remove();
@@ -101,6 +109,12 @@ public class DynamicExactalgo {
 					
 				}
 
+				/*System.out.println("Res ");
+				for(int x =0; x <res.length;x++){
+					System.out.print(res[x]+" ");
+				}
+				System.out.println();*/
+
 				//wm: just to avoid division by zero
 				if(vertex_num==0)
 					vertex_num=C.graph_size;
@@ -110,6 +124,7 @@ public class DynamicExactalgo {
 
 				//wm: if new motif density is greater than the current one, update the denset graph
 				if(low_bound>mds.densest) {
+					System.out.println("inside");
 					mds.densest=low_bound;
 					mds.motif_num=motif_num;
 					mds.s_t_result=res;

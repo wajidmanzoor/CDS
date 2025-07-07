@@ -462,6 +462,48 @@ __global__ void writeFinalCliques(deviceGraphPointers G, deviceDAGpointer D,
   }
 }
 
+__global__ void writeEdgeCliques(deviceGraphPointers G, deviceDAGpointer D,
+                                 deviceCliquesPointer cliqueData,
+                                 ui *cliqueCount, ui n, ui m, ui pSize,
+                                 ui trieSize, ui totalWarps) {
+  extern __shared__ char sharedMemory[];
+  ui sizeOffset = 0;
+  ui *counter = (ui *)(sharedMemory + sizeOffset);
+
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int warpId = idx / warpSize;
+  int laneId = idx % warpSize;
+
+  for (int i = warpId; i < n; i += totalWarps) {
+
+    int start = D.offset[i];
+    int total = D.offset[i + 1] - start;
+
+    if (laneId == 0) {
+      counter[threadIdx.x / warpSize] = start;
+      // printf("warp Id %d lane %d s %d e %d v %d
+      // \n",warpId,laneId,start,total,i);
+    }
+    __syncwarp();
+    // int degree = D.degree[i];
+
+    for (int j = laneId; j < total; j += warpSize) {
+      ui loc = atomicAdd(&counter[threadIdx.x / warpSize], 1);
+      // printf("warp Id %d lane %d  v %d loc %d neigh %d
+      // \n",warpId,laneId,i,loc,D.neighbors[start + j]);
+
+      cliqueData.trie[trieSize * 0 + loc] = i;
+      cliqueData.trie[trieSize * 1 + loc] = D.neighbors[start + j];
+      int core = min(G.cliqueCore[i], G.cliqueCore[D.neighbors[start + j]]);
+      cliqueData.status[loc] = core;
+      atomicAdd(&cliqueCount[core], 1);
+      // printf("warp Id %d lane %d  v %d loc %d neigh %d c %d
+      // \n",warpId,laneId,i,loc,D.neighbors[start + j],core);
+    }
+    __syncwarp();
+  }
+}
+
 __global__ void sortTrieData(deviceGraphPointers G,
                              deviceCliquesPointer cliqueData, ui totalCliques,
                              ui t, ui k, ui totalThreads) {
@@ -1035,8 +1077,8 @@ __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter,
     upperBound[i] = ub;
 
     if (ub > lb) {
-      ccOffset[i + 1] = totalCliques + totalSize + 2 + 1;
-      neighborSize[i + 1] = 2 * (2 * totalCliques * k + 2 * totalSize) + 1;
+      ccOffset[i] = totalCliques + totalSize + 2 + 1;
+      neighborSize[i] = (2 * totalCliques * k + 2 * totalSize);
 
     } else {
       ccOffset[i + 1] = 0;
@@ -1045,7 +1087,7 @@ __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter,
   }
 }
 
-__global__ void createFlowNetworkOffset(deviceGraphPointers G,
+/*__global__ void createFlowNetworkOffset(deviceGraphPointers G,
                                         deviceFlowNetworkPointers flowNetwork,
                                         deviceComponentPointers conComp,
                                         deviceCliquesPointer finalCliqueData,
@@ -1101,14 +1143,70 @@ __global__ void createFlowNetworkOffset(deviceGraphPointers G,
       }
     }
   }
+}*/
+
+__global__ void createFlowNetworkOffset(deviceGraphPointers G,
+                                        deviceFlowNetworkPointers flowNetwork,
+                                        deviceComponentPointers conComp,
+                                        deviceCliquesPointer finalCliqueData,
+                                        ui *compCounter, double *upperBound,
+                                        ui totalBlocks, ui totalComponents,
+                                        ui k, double lb, ui t) {
+
+  // int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int blockId = blockIdx.x;
+  int threadId = threadIdx.x;
+  int threadsPerBlock = blockDim.x;
+
+  for (ui i = blockId; i < totalComponents; i += totalBlocks) {
+    if (upperBound[i] > lb) {
+      ui start = conComp.componentOffset[i];
+      ui end = conComp.componentOffset[i + 1];
+      ui total = end - start;
+      ui startClique = compCounter[i];
+      ui totalCliques = compCounter[i + 1] - compCounter[i];
+      ui vertexOffset = flowNetwork.offset[i];
+
+      // Process vertices
+      for (ui j = threadId; j < total; j += threadsPerBlock) {
+        ui vertex = conComp.mapping[start + j];
+        ui cliqueDegree = 0;
+
+        for (ui x = 0; x < totalCliques; x++) {
+          for (ui k_ = 0; k_ < k; k_++) {
+            ui u = finalCliqueData.trie[t * k_ + startClique + x];
+            if (u == vertex) {
+              cliqueDegree++;
+            }
+          }
+        }
+        flowNetwork.neighborOffset2[vertexOffset + j + 1] =
+            2 * (cliqueDegree + 1);
+      }
+
+      // Process cliques
+      for (ui j = threadId; j < totalCliques; j += threadsPerBlock) {
+        flowNetwork.neighborOffset2[vertexOffset + total + j + 1] = 2 * k;
+      }
+
+      // Single-threaded final writes
+      if (threadId == 0) {
+        flowNetwork.neighborOffset2[vertexOffset + total + totalCliques + 1] =
+            total;
+        flowNetwork.neighborOffset2[vertexOffset + total + totalCliques + 2] =
+            total;
+        flowNetwork.neighborOffset2[0] = 0;
+      }
+    }
+  }
 }
 
-__global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork,
+/*__global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork,
                                   deviceComponentPointers conComp,
                                   deviceCliquesPointer finalCliqueData,
                                   ui *compCounter, double *upperBound,
-                                  ui totalWarps, ui totalComponents, ui k,
-                                  double lb, ui t) {
+                                  double *lowerBound, ui totalWarps,
+                                  ui totalComponents, ui k, double lb, ui t) {
 
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   int warpId = idx / warpSize;
@@ -1206,11 +1304,123 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork,
         flowNetwork.Edges[neighborOffset_sink + j] = j;
         flowNetwork.capacity[neighborOffset_sink + j] = 0.0;
       }
+
+      if (laneId == 0) {
+        lowerBound[i] = lb;
+      }
+    }
+  }
+}*/
+
+__global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork,
+                                  deviceComponentPointers conComp,
+                                  deviceCliquesPointer finalCliqueData,
+                                  ui *compCounter, double *upperBound,
+                                  double *lowerBound, ui totalBlocks,
+                                  ui totalComponents, ui k, double lb, ui t) {
+
+  // int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int blockId = blockIdx.x;
+  int threadId = threadIdx.x;
+  int threadsPerBlock = blockDim.x;
+
+  for (ui i = blockId; i < totalComponents; i += totalBlocks) {
+    if (upperBound[i] > lb) {
+      ui start = conComp.componentOffset[i];
+      ui end = conComp.componentOffset[i + 1];
+      ui total = end - start;
+      ui startClique = compCounter[i];
+      ui totalCliques = compCounter[i + 1] - compCounter[i];
+      ui vertexOffset = flowNetwork.offset[i];
+      double alpha = (upperBound[i] + lb) / 2;
+
+      // Process vertices
+      for (ui j = threadId; j < total; j += threadsPerBlock) {
+        ui neighborOffset = flowNetwork.neighborOffset2[vertexOffset + j];
+
+        // Vertex to sink
+        flowNetwork.Edges[neighborOffset] = total + totalCliques + 1;
+        flowNetwork.capacity[neighborOffset] = alpha * k;
+
+        // Vertex to source (backward)
+        flowNetwork.Edges[neighborOffset + 1] = total + totalCliques;
+        flowNetwork.capacity[neighborOffset + 1] = 0.0;
+
+        ui vertex = conComp.mapping[start + j];
+        ui cliqueDegree = flowNetwork.neighborOffset2[vertexOffset + j + 1] -
+                          flowNetwork.neighborOffset2[vertexOffset + j];
+        ui temp = 2;
+
+        for (ui x = 0; x < totalCliques; x++) {
+          ui u;
+          for (ui k_ = 0; k_ < k; k_++) {
+            u = finalCliqueData.trie[t * k_ + startClique + x];
+            if (u == vertex) {
+              // Vertex to clique
+              flowNetwork.Edges[neighborOffset + temp] = total + x;
+              flowNetwork.capacity[neighborOffset + temp] = 1.0;
+
+              // Vertex to clique backward
+              flowNetwork.Edges[neighborOffset + temp + 1] = total + x;
+              flowNetwork.capacity[neighborOffset + temp + 1] = 0.0;
+              temp += 2;
+            }
+          }
+          if (temp == (2 * cliqueDegree)) {
+            break;
+          }
+        }
+      }
+
+      // Process cliques
+      for (ui j = threadId; j < totalCliques; j += threadsPerBlock) {
+        ui neighborOffset =
+            flowNetwork.neighborOffset2[vertexOffset + total + j];
+        ui u;
+        for (ui k_ = 0; k_ < k; k_++) {
+          u = finalCliqueData.trie[t * k_ + startClique + j];
+
+          // Clique to vertex
+          flowNetwork.Edges[neighborOffset + 2 * k_] =
+              conComp.reverseMapping[u] - start;
+          flowNetwork.capacity[neighborOffset + 2 * k_] = DINF;
+
+          // Clique to vertex backward
+          flowNetwork.Edges[neighborOffset + 2 * k_ + 1] =
+              conComp.reverseMapping[u] - start;
+          flowNetwork.capacity[neighborOffset + 2 * k_ + 1] = 0;
+        }
+      }
+
+      // Process source and sink edges
+      ui neighborOffset_source =
+          flowNetwork.neighborOffset2[vertexOffset + total + totalCliques];
+      ui neighborOffset_sink =
+          flowNetwork.neighborOffset2[vertexOffset + total + totalCliques + 1];
+
+      for (ui j = threadId; j < total; j += threadsPerBlock) {
+        ui cliqueDegree = (flowNetwork.neighborOffset2[vertexOffset + j + 1] -
+                           flowNetwork.neighborOffset2[vertexOffset + j] - 2) /
+                          2;
+
+        // Source to vertex
+        flowNetwork.Edges[neighborOffset_source + j] = j;
+        flowNetwork.capacity[neighborOffset_source + j] = (double)cliqueDegree;
+
+        // Sink to vertex backward
+        flowNetwork.Edges[neighborOffset_sink + j] = j;
+        flowNetwork.capacity[neighborOffset_sink + j] = 0.0;
+      }
+
+      // Single-threaded final write
+      if (threadId == 0) {
+        lowerBound[i] = lb;
+      }
     }
   }
 }
 
-__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
+/*__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
                             deviceComponentPointers conComp,
                             deviceCliquesPointer finalCliqueData,
                             ui *compCounter, double *upperBound,
@@ -1244,8 +1454,8 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
     ui tFlow = totalCliques + total + 2;
 
     double bais = 1.0 / (tFlow * (tFlow - 1));
-    if (bais < 0.0001) {
-      bais = 0.0001;
+    if (bais < 0.001) {
+      bais = 0.001;
     }
 
     if ((upperBound[i] - lowerBound[i]) > bais) {
@@ -1329,7 +1539,7 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
             //
             /*if (flowNetwork.excess[fStart + vertex] == 0) {
             break;
-            }*/
+            }
             ui neigh = flowNetwork.Edges[x];
             double residual = flowNetwork.capacity[x] - flowNetwork.flow[x];
 
@@ -1454,8 +1664,8 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
       }
     }
   }
-}
-__global__ void getResult(deviceFlowNetworkPointers flowNetwork,
+}*/
+/*__global__ void getResult(deviceFlowNetworkPointers flowNetwork,
                           deviceComponentPointers conComp,
                           deviceCliquesPointer finalCliqueData, ui *compCounter,
                           double *upperBound, double *lowerBound,
@@ -1531,6 +1741,257 @@ __global__ void getResult(deviceFlowNetworkPointers flowNetwork,
       }
       __syncwarp();
     }
+  }
+}*/
+
+__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
+                            deviceComponentPointers conComp,
+                            deviceCliquesPointer finalCliqueData,
+                            ui *compCounter, double *upperBound,
+                            double *lowerBound, ui *activeNodes,
+                            ui *componentsLeft, ui *checkResult,
+                            int totalComponents, ui k, ui t, ui partitionSize) {
+
+  __shared__ ui activeCount; // 4 bytes per block
+  __shared__ ui shouldBreak;
+
+  // const int globalId = blockIdx.x * blockDim.x + threadIdx.x;
+  // const int totalThreads = gridDim.x * blockDim.x;
+  int threadId = threadIdx.x;
+  int threadsPerBlock = blockDim.x;
+
+  // Grid-stride loop to handle more components than blocks
+  for (ui i = blockIdx.x; i < totalComponents; i += gridDim.x) {
+    ui start = conComp.componentOffset[i];
+    ui end = conComp.componentOffset[i + 1];
+    ui total = end - start;
+    double bias = 1.0 / (total * (total - 1));
+    bias = max(bias, 0.001);
+
+    if ((upperBound[i] - lowerBound[i]) > bias) {
+      // Component data
+
+      ui cliqueStart = compCounter[i];
+      ui totalCliques = compCounter[i + 1] - cliqueStart;
+      ui fStart = flowNetwork.offset[i];
+      ui tFlow = total + totalCliques + 2;
+      ui source = tFlow - 2;
+      ui sink = tFlow - 1;
+
+      // Initialize heights and excess
+      for (ui j = threadId; j < tFlow; j += threadsPerBlock) {
+        flowNetwork.height[fStart + j] = (j == source) ? tFlow : 0;
+        flowNetwork.excess[fStart + j] = 0;
+      }
+      __syncthreads();
+
+      // Initial push from source to vertices
+      for (ui j = threadId; j < total; j += threadsPerBlock) {
+        ui nStart = flowNetwork.neighborOffset2[fStart + total + totalCliques];
+        ui neighbor = flowNetwork.Edges[nStart + j];
+        double capacity = flowNetwork.capacity[nStart + j];
+
+        flowNetwork.flow[nStart + j] = capacity;
+        atomicAdd(&flowNetwork.excess[fStart + neighbor], capacity);
+        flowNetwork.flow[flowNetwork.neighborOffset2[fStart + neighbor] + 1] =
+            -capacity;
+      }
+      __syncthreads();
+
+      // Push-relabel iterations
+      const int maxIterations = 1000;
+      for (int iter = 0; iter < maxIterations; iter++) {
+        if (threadId == 0) {
+          activeCount = 0;
+          shouldBreak = 1; // Assume we should break unless we find work
+        }
+        __syncthreads();
+
+        // Find active nodes
+        for (ui j = threadId; j < tFlow; j += threadsPerBlock) {
+          if (j != source && j != sink &&
+              flowNetwork.excess[fStart + j] > 1e-10) {
+            ui pos = atomicAdd(&activeCount, 1);
+            if (pos < partitionSize) {
+              activeNodes[blockIdx.x * partitionSize + pos] = j;
+              atomicAnd(&shouldBreak, 0); // We found work to do
+            }
+          }
+        }
+        __syncthreads();
+
+        // Termination check
+        if (shouldBreak)
+          break;
+
+        // Process active nodes
+        for (ui j = threadId; j < activeCount; j += threadsPerBlock) {
+          ui vertex = activeNodes[blockIdx.x * partitionSize + j];
+          ui nStart = flowNetwork.neighborOffset2[fStart + vertex];
+          ui nEnd = flowNetwork.neighborOffset2[fStart + vertex + 1];
+          bool pushed = false;
+
+          // Try to push flow
+          for (ui x = nStart; x < nEnd; x++) {
+            ui neighbor = flowNetwork.Edges[x];
+            double residual = flowNetwork.capacity[x] - flowNetwork.flow[x];
+
+            if ((flowNetwork.height[fStart + vertex] ==
+                 flowNetwork.height[fStart + neighbor] + 1) &&
+                (residual > 1e-10)) {
+
+              double delta = min(flowNetwork.excess[fStart + vertex], residual);
+              atomicAdd(&flowNetwork.flow[x], delta);
+              atomicAdd(&flowNetwork.excess[fStart + vertex], -delta);
+              atomicAdd(&flowNetwork.excess[fStart + neighbor], delta);
+
+              // Update backward edge
+              ui backStart = flowNetwork.neighborOffset2[fStart + neighbor];
+              ui backEnd = flowNetwork.neighborOffset2[fStart + neighbor + 1];
+              for (ui y = backStart; y < backEnd; y++) {
+                if (flowNetwork.Edges[y] == vertex) {
+                  atomicAdd(&flowNetwork.flow[y], -delta);
+                  break;
+                }
+              }
+              pushed = true;
+            }
+          }
+
+          // Relabel if needed
+          if (!pushed && flowNetwork.excess[fStart + vertex] > 1e-10) {
+            ui minHeight = UINT_MAX;
+            for (ui x = nStart; x < nEnd; x++) {
+              ui neighbor = flowNetwork.Edges[x];
+              double residual = flowNetwork.capacity[x] - flowNetwork.flow[x];
+              if (residual > 1e-10) {
+                minHeight =
+                    min(minHeight, flowNetwork.height[fStart + neighbor]);
+              }
+            }
+            if (minHeight != UINT_MAX) {
+              flowNetwork.height[fStart + vertex] = minHeight + 1;
+            }
+          }
+        }
+        __syncthreads();
+      }
+
+      // Update bounds and check result
+      if (threadId == 0) {
+        double alpha = (upperBound[i] + lowerBound[i]) / 2;
+        double expectedFlow = totalCliques * k;
+
+        if (fabs(flowNetwork.excess[fStart + sink] - expectedFlow) < 1e-3) {
+          upperBound[i] = alpha;
+        } else {
+          lowerBound[i] = alpha;
+          checkResult[i] = 1;
+        }
+
+        if ((upperBound[i] - lowerBound[i]) > bias) {
+          atomicAdd(componentsLeft, 1);
+        }
+      }
+
+      __syncthreads();
+    }
+  }
+}
+
+__global__ void getResult(deviceFlowNetworkPointers flowNetwork,
+                          deviceComponentPointers conComp,
+                          deviceCliquesPointer finalCliqueData, ui *compCounter,
+                          double *upperBound, double *lowerBound,
+                          double *densities, ui *checkResult,
+                          int totalComponents, ui k, ui t) {
+
+  ui __shared__ size;
+
+  // int globalId = blockIdx.x * blockDim.x + threadIdx.x;
+  // int totalThreads = gridDim.x * blockDim.x;
+  int threadId = threadIdx.x;
+  int threadsPerBlock = blockDim.x;
+
+  // Grid-stride loop to handle more components than blocks
+  for (ui i = blockIdx.x; i < totalComponents; i += gridDim.x) {
+    if (checkResult[i]) {
+      ui start = conComp.componentOffset[i];
+      ui end = conComp.componentOffset[i + 1];
+      ui total = end - start;
+      ui cliqueStart = compCounter[i];
+      ui cliqueEnd = compCounter[i + 1];
+      ui totalCliques = cliqueEnd - cliqueStart;
+      ui fStart = flowNetwork.offset[i];
+      ui neighborOffset =
+          flowNetwork.neighborOffset2[fStart + total + totalCliques];
+
+      // Initialize shared memory for this component
+      if (threadId == 0) {
+        size = 0;
+        densities[i] = 0; // Reset density counter
+      }
+      __syncthreads();
+
+      // Count vertices with positive residual (parallel across all threads)
+      for (ui j = threadId; j < total; j += threadsPerBlock) {
+        double residual = flowNetwork.capacity[neighborOffset + j] -
+                          flowNetwork.flow[neighborOffset + j];
+        if (residual > 1e-10) {
+          atomicAdd(&size, 1);
+        }
+      }
+      __syncthreads();
+
+      // Check cliques (parallel across all threads)
+      for (ui j = threadId; j < totalCliques; j += threadsPerBlock) {
+        bool found = true;
+        for (ui w = 0; w < k && found; w++) {
+          ui vertex =
+              conComp.reverseMapping[finalCliqueData
+                                         .trie[w * t + j + cliqueStart]] -
+              start;
+          double residual = flowNetwork.capacity[neighborOffset + vertex] -
+                            flowNetwork.flow[neighborOffset + vertex];
+          if (residual <= 1e-10) {
+            found = false;
+          }
+        }
+        if (found) {
+          atomicAdd(&densities[i], 1.0);
+        }
+      }
+      __syncthreads();
+
+      // Final density calculation (single thread per component)
+      if (threadId == 0) {
+        if (size == 0) {
+          densities[i] = lowerBound[i];
+        } else {
+          densities[i] = densities[i] / (size);
+        }
+      }
+      __syncthreads();
+      // Ensure all threads finish before next component
+
+      // Update network capacities if needed
+    }
+
+    ui start = conComp.componentOffset[i];
+    ui end = conComp.componentOffset[i + 1];
+    ui total = end - start;
+    double bias = 1.0 / (total * (total - 1));
+    bias = max(bias, 0.001);
+    ui fStart = flowNetwork.offset[i];
+
+    if ((upperBound[i] - lowerBound[i]) > bias) {
+      double alpha = (upperBound[i] + lowerBound[i]) / 2;
+      for (ui j = threadId; j < total; j += threadsPerBlock) {
+        ui neighborOffset = flowNetwork.neighborOffset2[fStart + j];
+        flowNetwork.capacity[neighborOffset] = alpha * k;
+      }
+    }
+    __syncthreads();
   }
 }
 

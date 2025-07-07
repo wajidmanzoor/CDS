@@ -1,0 +1,77 @@
+filepath: /content/drive/MyDrive/DSD/cudaCodeV2/data/test2.txt
+k: 3
+pSize: 10
+cpSize: 10
+n =10, m=17
+Graph Data 
+Graph
+Offset: 0 1 4 8 12 16 20 24 28 31 34 
+Neighbors: 1 0 2 3 1 3 4 5 1 2 4 5 2 3 5 6 2 3 4 7 4 7 8 9 5 6 8 9 6 7 9 6 7 8 
+Degree: 1 3 4 4 4 4 4 4 3 3 
+maxDegree = 4
+
+
+Listing Order: 10 9 6 5 2 1 4 3 8 7 
+Core 1 2 3 3 3 3 3 3 3 3 
+Peel Seq 5 4 7 6 3 2 9 8 1 0 
+
+
+DAG DATA
+
+DAG
+Degree 0 1 1 2 3 4 2 3 0 1 
+offset 0 0 1 2 4 7 11 13 16 16 17 
+neigh 0 1 1 2 2 3 6 2 3 4 7 8 9 6 8 9 8 
+
+
+Cliques Data 
+
+CL 0  7 7 6 5 4 3 7 5 5 
+CL 1  6 6 9 3 3 2 9 4 4 
+CL 2  8 9 8 2 2 1 8 2 3 
+stat  4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 4294967295 
+Clique Degree
+0 1 2 3 4 5 6 7 8 9 
+0 1 4 4 3 3 3 3 3 3 
+
+Clique data after core decompose 
+
+CL 0  7 7 6 5 4 3 7 5 5 
+CL 1  6 6 9 3 3 2 9 4 4 
+CL 2  8 9 8 2 2 1 8 2 3 
+stat  3 3 3 3 3 1 3 3 3 
+Core Values 
+0 1 3 3 3 3 3 3 3 3 
+
+offset b 0 4 4 4 4 3 3 4 2 4 
+
+Densest core data 
+
+mapping 2 3 6 7 8 9 4 1 5 
+offset 0 4 8 12 16 19 22 26 28 32 
+
+neighbors 7 1 6 8 7 0 6 8 6 3 4 5 8 2 4 5 2 3 5 2 3 4 0 1 8 2 0 1 0 1 6 3 
+
+Neigh Status
+0 0 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 1 
+
+Data After Pruning 
+in offset0 4 8 11 14 17 20 23 25 28 
+in neigh7 1 6 8 7 0 6 8 3 4 5 2 4 5 2 3 5 2 3 4 0 1 8 0 1 0 1 6 
+comp 2 0 0 2 2 2 2 0 0 0 
+Unique components: 2
+
+Component Data 
+c off 0 5 9 
+comp 0 0 0 0 0 1 1 1 1 
+ mapping 
+0 1 6 7 8 2 3 4 5 
+R Map
+0 1 5 6 7 8 2 3 4 
+
+CL 0  8 6 1 8 8 3 3 2 3 
+CL 1  1 1 0 6 6 2 2 5 5 
+CL 2  0 0 7 0 1 4 5 4 4 
+stat  0 0 0 0 0 1 1 1 1 
+Max density: 1
+Time taken: 175.754 ms

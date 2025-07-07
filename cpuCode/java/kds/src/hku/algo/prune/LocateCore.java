@@ -10,6 +10,7 @@ public class LocateCore {
 	//wm: verticies, motif degree, average motif density, core values 
 	private double[][] core=null;
 	private int graph_size;
+	public int[] reverse_map = null;
 	
 	public LocateCore(int[][] Graph,double[][] core,int graph_size) {
 		this.Graph=Graph;
@@ -32,6 +33,7 @@ public class LocateCore {
 
 		
 		//wm: delete all verticies with motif degree lower than the lower bound 
+		// PROBLEM: WE SHOULD CHECK CORE[INDEX][2]
 		int index=1;
 		int delete[]=new int[graph_size];
 		Arrays.fill(delete, 0);
@@ -94,6 +96,14 @@ public class LocateCore {
 					New_Graph[delete[i]][j]=array[j];
 				}
 				
+			}
+		}
+
+		reverse_map = new int[graph_size];  // size is the number of surviving vertices
+
+		for (int i = 0; i < delete.length; i++) {
+			if (delete[i] != -1) {
+				reverse_map[delete[i]] = i;
 			}
 		}
 

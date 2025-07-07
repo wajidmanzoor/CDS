@@ -29,6 +29,10 @@ __global__ void writeFinalCliques(deviceGraphPointers G, deviceDAGpointer D,
                                   ui pSize, ui cpSize, ui maxBitMask,
                                   ui trieSize, ui totalTasks, ui level,
                                   ui totalWarps);
+__global__ void writeEdgeCliques(deviceGraphPointers G, deviceDAGpointer D,
+                                 deviceCliquesPointer cliqueData,
+                                 ui *cliqueCount, ui n, ui m, ui pSize,
+                                 ui trieSize, ui totalWarps);
 __global__ void countCliques(deviceDAGpointer D,
                              cliqueLevelDataPointer levelData,
                              ui *globalCounter, ui maxBitMask, ui totalTasks,
@@ -93,20 +97,49 @@ __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter,
                                double *lowerBound, double *upperBound,
                                ui *ccOffset, ui *neighborSize,
                                ui totalComponenets, ui k, double maxDensity);
-__global__ void createFlowNetworkOffset(deviceGraphPointers G,
+/*__global__ void createFlowNetworkOffset(deviceGraphPointers G,
                                         deviceFlowNetworkPointers flowNetwork,
                                         deviceComponentPointers conComp,
                                         deviceCliquesPointer finalCliqueData,
                                         ui *compCounter, double *upperBound,
                                         ui totalWarps, ui totalComponents, ui k,
-                                        double lb, ui t);
+                                        double lb, ui t);*/
+__global__ void createFlowNetworkOffset(deviceGraphPointers G,
+                                        deviceFlowNetworkPointers flowNetwork,
+                                        deviceComponentPointers conComp,
+                                        deviceCliquesPointer finalCliqueData,
+                                        ui *compCounter, double *upperBound,
+                                        ui totalBlocks, ui totalComponents,
+                                        ui k, double lb, ui t);
+/*__global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork,
+                                  deviceComponentPointers conComp,
+                                  deviceCliquesPointer finalCliqueData,
+                                  ui *compCounter, double *upperBound,
+                                  double *lowerBound, ui totalWarps,
+                                  ui totalComponents, ui k, double lb, ui t);*/
 __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork,
                                   deviceComponentPointers conComp,
                                   deviceCliquesPointer finalCliqueData,
                                   ui *compCounter, double *upperBound,
-                                  ui totalWarps, ui totalComponents, ui k,
-                                  double lb, ui t);
+                                  double *lowerBound, ui totalBlocks,
+                                  ui totalComponents, ui k, double lb, ui t);
+
 __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
+                            deviceComponentPointers conComp,
+                            deviceCliquesPointer finalCliqueData,
+                            ui *compCounter, double *upperBound,
+                            double *lowerBound, ui *activeNodes,
+                            ui *componentsLeft, ui *checkResult,
+                            int totalComponents, ui k, ui t, ui partitionSize);
+
+__global__ void getResult(deviceFlowNetworkPointers flowNetwork,
+                          deviceComponentPointers conComp,
+                          deviceCliquesPointer finalCliqueData, ui *compCounter,
+                          double *upperBound, double *lowerBound,
+                          double *densities, ui *checkResult,
+                          int totalComponents, ui k, ui t);
+
+/*__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
                             deviceComponentPointers conComp,
                             deviceCliquesPointer finalCliqueData,
                             ui *compCounter, double *upperBound,
@@ -118,8 +151,8 @@ __global__ void getResult(deviceFlowNetworkPointers flowNetwork,
                           deviceCliquesPointer finalCliqueData, ui *compCounter,
                           double *upperBound, double *lowerBound,
                           double *densities, ui *checkResult, ui totalWarps,
-                          int totalComponents, ui k, ui t);
+                          int totalComponents, ui k, ui t);*/
 //__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
-//deviceComponentPointers conComp, densestCorePointer densestCore,
-//deviceCliquesPointer finalCliqueData, ui *compCounter,double *upperBound, ui
-//totalWarps, int totalComponents, ui k, double lb);
+// deviceComponentPointers conComp, densestCorePointer densestCore,
+// deviceCliquesPointer finalCliqueData, ui *compCounter,double *upperBound, ui
+// totalWarps, int totalComponents, ui k, double lb);

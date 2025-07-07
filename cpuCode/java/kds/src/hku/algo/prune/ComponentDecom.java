@@ -12,6 +12,7 @@ public class ComponentDecom {
 	private int[][] Graph=null;
 	private int graph_size;
 	private Map<String,int[]> motif_list;
+	public int[][] Reverse_map_node = null;
 	
 	public ComponentDecom(int[][] Graph,int graph_size,Map<String,int[]> motif_list) {
 		this.Graph=Graph;
@@ -80,6 +81,20 @@ public class ComponentDecom {
 				Map_node[i]=New_graph_size[delete[i]];
 				New_graph_size[delete[i]]++;
 			}
+
+			Reverse_map_node = new int[index + 1][];
+
+			for (int i = 1; i <= index; i++) {
+					Reverse_map_node[i] = new int[New_graph_size[i]]; // after the first loop
+				}
+
+			int[] temp_index = new int[index+1]; // To keep track of insertion
+			for (int i = 0; i < graph_size; ++i) {
+				int component_id = delete[i];
+				int new_vertex_id = Map_node[i]; // Already computed
+				Reverse_map_node[component_id][new_vertex_id] = i; // Reverse map
+				temp_index[component_id]++;
+			}
 			
 
 			//wm: store the updated mottifs in new array of hash maps (as vertex numbering was changed)
@@ -143,7 +158,7 @@ public class ComponentDecom {
 				
 				//wm: create connected component object 
 				Component c=new Component(C_Graph[i],New_graph_size[i],
-						map_array[i],motif_num,(double)motif_num/(New_graph_size[i]*1.0),motif_degree);
+						map_array[i],motif_num,(double)motif_num/(New_graph_size[i]*1.0),motif_degree, Reverse_map_node[i]);
 				
 				//wm: add to queue
 				result.add(c);

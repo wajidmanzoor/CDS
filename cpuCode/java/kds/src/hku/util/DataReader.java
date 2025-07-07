@@ -27,6 +27,7 @@ public class DataReader {
 	public int Motif_Count=1;
 	/** the number of vertex in the given graph*/
 	public int graph_size=0;
+	public long count_edge=0;
 	
 	public int Graph[][]=null;
 	public int Motif[][]=null;
@@ -66,7 +67,7 @@ public class DataReader {
 		// wm: Graph is a list if lists, with each ith list correponsing to a ith vertex and consisting of all its neighbors 
 		int Graph[][]=null;
 		//Em: Total Edges in the graph
-		long count_edge=0;
+		count_edge=0;
 		try {
 			BufferedReader stdin=new BufferedReader(new FileReader(Graph_File));
 			String line=null;
@@ -93,7 +94,7 @@ public class DataReader {
 				}
 			}
 			
-			System.out.println("###"+count_edge/2);
+			System.out.println("V: "+graph_size +" E: "+ count_edge/2);
 			stdin.close();
 			
 		} catch (FileNotFoundException e) {
