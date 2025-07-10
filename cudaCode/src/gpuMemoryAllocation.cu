@@ -35,44 +35,14 @@ void memoryAllocationDAG(deviceDAGpointer &D, ui n, ui m) {
   cudaDeviceSynchronize();
 }
 
-/*void memoryAllocationMotif(deviceMotifPointers &M, Motif &motif) {
-    ui n = motif.size;
-
-    chkerr(cudaMalloc((void**)&(M.adjacencyMatrix), (n * n) * sizeof(ui)));
-
-    // TODO: Flatten motif.adjMatrix
-    std::vector<ui> flatMatrix(n * n);
-    // Flatten the 2D adjacency matrix into a 1D array
-    for (ui i = 0; i < n; ++i) {
-        for (ui j = 0; j < n; ++j) {
-            flatMatrix[i * n + j] = (*motif.adjMatrix)[i][j];
-        }
-    }
-
-    chkerr(cudaMemcpy(M.adjacencyMatrix, flatMatrix.data(), (n * n) *
-sizeof(ui), cudaMemcpyHostToDevice)); cudaDeviceSynchronize();
-}*/
-
-ui *componentOffset;
-ui *components;
-ui *mapping;
-
 void memoryAllocationComponent(deviceComponentPointers &C, ui n, ui m) {
   chkerr(cudaMalloc((void **)&(C.componentOffset), (n + 1) * sizeof(ui)));
   chkerr(cudaMemset(C.componentOffset, 0, (n + 1) * sizeof(ui)));
   chkerr(cudaMalloc((void **)&(C.components), n * sizeof(ui)));
   chkerr(cudaMalloc((void **)&(C.mapping), n * sizeof(ui)));
-  chkerr(cudaMalloc((void **)&(C.reverseMapping), n * sizeof(ui)))
-      cudaDeviceSynchronize();
+  chkerr(cudaMalloc((void **)&(C.reverseMapping), n * sizeof(ui)));
+  cudaDeviceSynchronize();
 }
-
-/*void memoryAllocationresult(deviceResultpointer &R, ui n) {
-    chkerr(cudaMalloc((void**)&(R.maxDensity), sizeof(double)));
-    chkerr(cudaMalloc((void**)&(R.numVertex), sizeof(ui)));
-    chkerr(cudaMalloc((void**)&(R.component), sizeof(ui)));
-    chkerr(cudaMalloc((void**)&(R.status), n * sizeof(ui)));
-    cudaDeviceSynchronize();
-}*/
 
 void memoryAllocationTrie(deviceCliquesPointer &C, ui t, ui k) {
   chkerr(cudaMalloc((void **)&(C.trie), (t * k) * sizeof(ui)));
@@ -166,20 +136,15 @@ void memoryAllocationFlowNetwork(deviceFlowNetworkPointers &flowNetwork,
   chkerr(cudaMalloc((void **)&(flowNetwork.excess),
                     (vertexSize) * sizeof(double)));
 
-  chkerr(cudaMalloc((void **)&(flowNetwork.foffset),
+  chkerr(cudaMalloc((void **)&(flowNetwork.offset),
                     (vertexSize + 1) * sizeof(ui)));
-  chkerr(cudaMalloc((void **)&(flowNetwork.fneighbors),
-                    neighborSize * sizeof(ui)));
+  chkerr(
+      cudaMalloc((void **)&(flowNetwork.neighbors), neighborSize * sizeof(ui)));
   chkerr(cudaMalloc((void **)&(flowNetwork.capacity),
                     neighborSize * sizeof(double)));
   chkerr(
-      cudaMalloc((void **)&(flowNetwork.fflow), neighborSize * sizeof(double)));
+      cudaMalloc((void **)&(flowNetwork.flow), neighborSize * sizeof(double)));
 
-  chkerr(cudaMalloc((void **)&(flowNetwork.boffset),
-                    (vertexSize + 1) * sizeof(ui)));
-  chkerr(cudaMalloc((void **)&(flowNetwork.bneighbors),
-                    neighborSize * sizeof(ui)));
-  chkerr(cudaMalloc((void **)&(flowNetwork.bflow), neighborSize * sizeof(ui)));
   chkerr(
       cudaMalloc((void **)&(flowNetwork.flowIndex), neighborSize * sizeof(ui)));
 
@@ -198,24 +163,13 @@ void freeGraph(deviceGraphPointers &G) {
   chkerr(cudaFree(G.motifCount));
 }
 
-/*void freeMotif(deviceMotifPointers &M) {
-    chkerr(cudaFree(M.adjacencyMatrix));
-}*/
-
 void freeComponents(deviceComponentPointers &C) {
   chkerr(cudaFree(C.componentOffset));
   chkerr(cudaFree(C.components));
   chkerr(cudaFree(C.mapping));
 }
 
-/*void freeResults(deviceResultpointer &R) {
-    chkerr(cudaFree(R.maxDensity));
-    chkerr(cudaFree(R.numVertex));
-    chkerr(cudaFree(R.component));
-    chkerr(cudaFree(R.status));
-}*/
-
-void freTrie(deviceCliquesPointer &C) {
+void freeTrie(deviceCliquesPointer &C) {
   chkerr(cudaFree(C.trie));
   chkerr(cudaFree(C.status));
 }
@@ -261,9 +215,9 @@ void freePruneneighbors(devicePrunedNeighbors &P) {
 void freeFlownetwork(deviceFlowNetworkPointers &F) {
   chkerr(cudaFree(F.height));
   chkerr(cudaFree(F.excess));
-  chkerr(cudaFree(F.foffset));
-  chkerr(cudaFree(F.fneighbors));
+  chkerr(cudaFree(F.offset));
+  chkerr(cudaFree(F.neighbors));
   chkerr(cudaFree(F.capacity));
-  chkerr(cudaFree(F.fflow));
+  chkerr(cudaFree(F.flow));
   chkerr(cudaFree(F.flowIndex));
 }
