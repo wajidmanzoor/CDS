@@ -789,11 +789,6 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
   double *upperBound = bounds;
   double *lowerBound = bounds + totalComponents;
 
-  chkerr(cudaMalloc((void **)&flowNetwork.offset,
-                    (1 + totalComponents) * sizeof(ui)));
-  chkerr(cudaMalloc((void **)&flowNetwork.neighborOffset1,
-                    (1 + totalComponents) * sizeof(ui)));
-
   int max_int = thrust::reduce(
       thrust::device_pointer_cast(deviceGraph.cliqueCore),
       thrust::device_pointer_cast(deviceGraph.cliqueCore + graph.n), 0,
@@ -814,9 +809,181 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
   cudaDeviceSynchronize();
   CUDA_CHECK_ERROR("Get UB LU and Size");
 
+  if (DEBUG) {
+    double *l_b, *u_b;
+    l_b = new double[totalComponents];
+    u_b = new double[totalComponents];
+    chkerr(cudaMemcpy(l_b, lowerBound, totalComponents * sizeof(double),
+                      cudaMemcpyDeviceToHost));
+
+    chkerr(cudaMemcpy(u_b, upperBound, totalComponents * sizeof(double),
+                      cudaMemcpyDeviceToHost));
+
+    cout << "lb ";
+    for (ui i = 0; i < totalComponents; i++) {
+      cout << l_b[i] << " ";
+    }
+    cout << endl;
+
+    cout << "ub ";
+    for (ui i = 0; i < totalComponents; i++) {
+      cout << u_b[i] << " ";
+    }
+    cout << endl;
+  }
+
+  double max_lowerBound = *thrust::max_element(
+      thrust::device_pointer_cast(lowerBound),
+      thrust::device_pointer_cast(lowerBound + totalComponents));
+
+  cout << " max lb " << max_lowerBound << endl;
+
+  thrust::fill(thrust::device_pointer_cast(lowerBound),
+               thrust::device_pointer_cast(lowerBound + totalComponents),
+               max_lowerBound);
+
   int iter = 0;
   while (iter < totalComponents) {
-    // Create
+    ui vertexSize, neighborSize;
+    chkerr(cudaMemcpy(&vertexSize, flownetworkSize + iter, sizeof(ui),
+                      cudaMemcpyDeviceToHost));
+
+    chkerr(cudaMemcpy(&neighborSize, flownetworkNeighSize + iter, sizeof(ui),
+                      cudaMemcpyDeviceToHost));
+    double ub, lb;
+    chkerr(cudaMemcpy(&ub, upperBound + iter, sizeof(double),
+                      cudaMemcpyDeviceToHost));
+    chkerr(cudaMemcpy(&lb, lowerBound + iter, sizeof(double),
+                      cudaMemcpyDeviceToHost));
+    if (ub > lb) {
+      ui start, end, total;
+      chkerr(cudaMemcpy(&start, conComp.componentOffset + iter, sizeof(ui),
+                        cudaMemcpyDeviceToHost));
+      chkerr(cudaMemcpy(&end, conComp.componentOffset + iter + 1, sizeof(ui),
+                        cudaMemcpyDeviceToHost));
+      total = end - start;
+
+      memoryAllocationFlowNetwork(flowNetwork, vertexSize, neighborSize);
+
+      thrust::fill(thrust::device_pointer_cast(flowNetwork.foffset + 1),
+                   thrust::device_pointer_cast(flowNetwork.foffset + total + 1),
+                   2);
+
+      createFlowNetworkOffset<<<BLK_NUMS, BLK_DIM>>>(
+          flowNetwork, conComp, finalCliqueData, compCounter, iter, k,
+          newTotaLCliques);
+      cudaDeviceSynchronize();
+      CUDA_CHECK_ERROR("Create Flow Network Offset");
+
+      thrust::inclusive_scan(
+          thrust::device_pointer_cast(flowNetwork.foffset),
+          thrust::device_pointer_cast(flowNetwork.foffset + vertexSize + 1),
+          thrust::device_pointer_cast(flowNetwork.foffset));
+      /*thrust::inclusive_scan(
+          thrust::device_pointer_cast(flowNetwork.boffset),
+          thrust::device_pointer_cast(flowNetwork.boffset + vertexSize + 1),
+          thrust::device_pointer_cast(flowNetwork.boffset));*/
+      ui *counter;
+      chkerr(cudaMalloc((void **)&counter, total * sizeof(ui)));
+      chkerr(cudaMemset(counter, 0, total * sizeof(ui)));
+
+      createFlowNetwork<<<BLK_NUMS, BLK_DIM>>>(
+          flowNetwork, conComp, finalCliqueData, compCounter, upperBound,
+          lowerBound, counter, iter, k, newTotaLCliques);
+      cudaDeviceSynchronize();
+      CUDA_CHECK_ERROR("Create Flow Network");
+      chkerr(cudaFree(counter));
+      if (DEBUG) {
+        ui *offset, *neighbor, *index;
+        offset = new ui[vertexSize + 1];
+        neighbor = new ui[neighborSize];
+        index = new ui[neighborSize];
+
+        double *cap, *flow;
+        cap = new double[neighborSize];
+        flow = new double[neighborSize];
+
+        cudaMemcpy(offset, flowNetwork.foffset, (vertexSize + 1) * sizeof(ui),
+                   cudaMemcpyDeviceToHost);
+
+        cudaMemcpy(neighbor, flowNetwork.fneighbors,
+                   (neighborSize) * sizeof(ui), cudaMemcpyDeviceToHost);
+
+        cudaMemcpy(index, flowNetwork.flowIndex, (neighborSize) * sizeof(ui),
+                   cudaMemcpyDeviceToHost);
+        cudaMemcpy(cap, flowNetwork.capacity, (neighborSize) * sizeof(double),
+                   cudaMemcpyDeviceToHost);
+        cudaMemcpy(flow, flowNetwork.fflow, (neighborSize) * sizeof(double),
+                   cudaMemcpyDeviceToHost);
+
+        cout << "offset ";
+        for (ui i = 0; i < vertexSize + 1; i++) {
+          cout << offset[i] << " ";
+        }
+        cout << endl;
+
+        cout << "Neigh ";
+        for (ui i = 0; i < neighborSize; i++) {
+          cout << neighbor[i] << " ";
+        }
+        cout << endl;
+
+        cout << "index ";
+        for (ui i = 0; i < neighborSize; i++) {
+          cout << index[i] << " ";
+        }
+        cout << endl;
+
+        cout << "cap ";
+        for (ui i = 0; i < neighborSize; i++) {
+          cout << cap[i] << " ";
+        }
+        cout << endl;
+
+        cout << "flow ";
+        for (ui i = 0; i < neighborSize; i++) {
+          cout << flow[i] << " ";
+        }
+        cout << endl;
+      }
+      double *totalExcess;
+      chkerr(cudaMalloc((void **)&totalExcess, sizeof(double)));
+      chkerr(cudaMemset(totalExcess, 0, sizeof(double)));
+      preFlow<<<BLK_NUMS, BLK_DIM>>>(flowNetwork, conComp, compCounter,
+                                     totalExcess, iter);
+      cudaDeviceSynchronize();
+      CUDA_CHECK_ERROR("Preflow send");
+      double hostSourceExcess, hostSinkExcess, hostTotalExcess;
+      chkerr(cudaMemcpy(&hostSourceExcess, flowNetwork.excess + vertexSize - 2,
+                        sizeof(double), cudaMemcpyDeviceToHost));
+      chkerr(cudaMemcpy(&hostSinkExcess, flowNetwork.excess + vertexSize - 1,
+                        sizeof(double), cudaMemcpyDeviceToHost));
+      chkerr(cudaMemcpy(&hostTotalExcess, totalExcess, sizeof(double),
+                        cudaMemcpyDeviceToHost));
+      int device = -1;
+      cudaGetDevice(&device);
+      cudaDeviceProp deviceProp;
+      cudaGetDeviceProperties(&deviceProp, device);
+      dim3 num_blocks(deviceProp.multiProcessorCount * numBlocksPerSM);
+      dim3 block_size(numThreadsPerBlock);
+      size_t sharedMemSize = 3 * block_size.x * sizeof(int);
+      int num_warps = (block_size.x * num_blocks.x) / 32;
+      ui *activeNodes;
+      chkerr(cudaMalloc((void **)&activeNodes, neighborSize * sizeof(ui)));
+      __device__ unsigned int globalCounter;
+      void *kernel_args[] = {&flowNetwork, &conComp,     &compCounter,
+                             &totalExcess, &activeNodes, &globalCounter,
+                             &iter};
+      while (hostSourceExcess + hostSinkExcess < hostTotalExcess) {
+        cudaLaunchCooperativeKernel((void *)push_relabel, num_blocks,
+                                    block_size, kernel_args, sharedMemSize, 0);
+        cudaDeviceSynchronize();
+        CUDA_CHECK_ERROR("Create Flow Network");
+      }
+    }
+
+    iter++;
+    break;
   }
 }
 
@@ -827,18 +994,18 @@ int main(int argc, const char *argv[]) {
   }
 
   string filepath =
-      argv[1]; //  Path to the graph file. The graph should be represented as an
-               //  adjacency list with space separators
+      argv[1]; //  Path to the graph file. The graph should be represented as
+               //  an adjacency list with space separators
   // string motifPath = argv[2]; // Path to motif file. The motif should be
   // represented as edge list with space sperators. Not used yet
   ui k = atoi(argv[2]);      // The clique we are intrested in.
   ui pSize = atoi(argv[3]);  // Virtual Partition size for storing partial
                              // cliques in Listing Algorithm
-  ui cpSize = atoi(argv[4]); // Virtual Partition size for storing Candidates of
-                             // PC in Listing Algorithm
+  ui cpSize = atoi(argv[4]); // Virtual Partition size for storing Candidates
+                             // of PC in Listing Algorithm
   ui glBufferSize =
-      atoi(argv[5]); // Buffer to store the vertices that need to be removed in
-                     // clique core decompose peeling algorithm
+      atoi(argv[5]); // Buffer to store the vertices that need to be removed
+                     // in clique core decompose peeling algorithm
   ui partitionSize = atoi(argv[6]); // Virtual Partition to store the active
                                     // node of each flownetwork
   // ui t = atoi(argv[8]);             // Total Number of cliques.
@@ -901,8 +1068,8 @@ int main(int argc, const char *argv[]) {
   memoryAllocationGraph(deviceGraph, graph);
 
   // Generates the DAG based on the listing order.
-  // Only includes edges from a vertex with a lower listing order to one with a
-  // higher listing order.
+  // Only includes edges from a vertex with a lower listing order to one with
+  // a higher listing order.
   generateDAG(graph, deviceGraph, deviceDAG, listingOrder);
 
   ui totalCliques;
@@ -1042,8 +1209,8 @@ int main(int argc, const char *argv[]) {
   // Structure to store connected components
   memoryAllocationComponent(conComp, vertexCount, newEdgeCount);
 
-  // Decomposes the graph into connected components and remaps vertex IDs within
-  // each component.
+  // Decomposes the graph into connected components and remaps vertex IDs
+  // within each component.
   ui totalComponents =
       componentDecompose(conComp, prunedNeighbors, vertexCount, newEdgeCount);
 

@@ -93,66 +93,28 @@ __global__ void rearrangeCliqueData(deviceComponentPointers conComp,
                                     ui *compCounter, ui *counter,
                                     ui totaLCliques, ui k, ui newTotaLCliques,
                                     ui totalThreads);
+
 __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter,
                                double *lowerBound, double *upperBound,
                                ui *ccOffset, ui *neighborSize,
                                ui totalComponenets, ui k, double maxDensity);
-/*__global__ void createFlowNetworkOffset(deviceGraphPointers G,
-                                        deviceFlowNetworkPointers flowNetwork,
+
+__global__ void createFlowNetworkOffset(deviceFlowNetworkPointers flowNetwork,
                                         deviceComponentPointers conComp,
                                         deviceCliquesPointer finalCliqueData,
-                                        ui *compCounter, double *upperBound,
-                                        ui totalWarps, ui totalComponents, ui k,
-                                        double lb, ui t);*/
-__global__ void createFlowNetworkOffset(deviceGraphPointers G,
-                                        deviceFlowNetworkPointers flowNetwork,
-                                        deviceComponentPointers conComp,
-                                        deviceCliquesPointer finalCliqueData,
-                                        ui *compCounter, double *upperBound,
-                                        ui totalBlocks, ui totalComponents,
-                                        ui k, double lb, ui t);
-/*__global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork,
-                                  deviceComponentPointers conComp,
-                                  deviceCliquesPointer finalCliqueData,
-                                  ui *compCounter, double *upperBound,
-                                  double *lowerBound, ui totalWarps,
-                                  ui totalComponents, ui k, double lb, ui t);*/
+                                        ui *compCounter, ui iter, ui k, ui t);
+
 __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork,
                                   deviceComponentPointers conComp,
                                   deviceCliquesPointer finalCliqueData,
                                   ui *compCounter, double *upperBound,
-                                  double *lowerBound, ui totalBlocks,
-                                  ui totalComponents, ui k, double lb, ui t);
+                                  double *lowerBound, ui *counter, ui iter,
+                                  ui k, ui t);
 
-__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
-                            deviceComponentPointers conComp,
-                            deviceCliquesPointer finalCliqueData,
-                            ui *compCounter, double *upperBound,
-                            double *lowerBound, ui *activeNodes,
-                            ui *componentsLeft, ui *checkResult,
-                            int totalComponents, ui k, ui t, ui partitionSize);
+__global__ void preFlow(deviceFlowNetworkPointers flowNetwork,
+                        deviceComponentPointers conComp, ui *compCounter,
+                        double *totalExcess, ui iter);
 
-__global__ void getResult(deviceFlowNetworkPointers flowNetwork,
-                          deviceComponentPointers conComp,
-                          deviceCliquesPointer finalCliqueData, ui *compCounter,
-                          double *upperBound, double *lowerBound,
-                          double *densities, ui *checkResult,
-                          int totalComponents, ui k, ui t);
-
-/*__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
-                            deviceComponentPointers conComp,
-                            deviceCliquesPointer finalCliqueData,
-                            ui *compCounter, double *upperBound,
-                            double *lowerBound, ui *activeNodes,
-                            ui *componenetsLeft, ui *checkResult, ui totalWarps,
-                            int totalComponents, ui k, ui t, ui partitionSize);
-__global__ void getResult(deviceFlowNetworkPointers flowNetwork,
-                          deviceComponentPointers conComp,
-                          deviceCliquesPointer finalCliqueData, ui *compCounter,
-                          double *upperBound, double *lowerBound,
-                          double *densities, ui *checkResult, ui totalWarps,
-                          int totalComponents, ui k, ui t);*/
-//__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
-// deviceComponentPointers conComp, densestCorePointer densestCore,
-// deviceCliquesPointer finalCliqueData, ui *compCounter,double *upperBound, ui
-// totalWarps, int totalComponents, ui k, double lb);
+__global__ void push_relabel(deviceFlowNetworkPointers flowNetwork,
+                             deviceComponentPointers conComp, ui *compCounter,
+                             double *totalExcess, ui *activeNodes, ui iter);

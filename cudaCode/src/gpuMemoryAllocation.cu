@@ -160,25 +160,28 @@ void memoryAllocationPrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors,
 }
 
 void memoryAllocationFlowNetwork(deviceFlowNetworkPointers &flowNetwork,
-                                 ui vertexSize, ui neighborSize,
-                                 ui totalComponents) {
-
-  chkerr(cudaMalloc((void **)&(flowNetwork.neighborOffset2),
-                    (vertexSize) * sizeof(ui)));
-
-  chkerr(cudaMalloc((void **)&(flowNetwork.Edges), neighborSize * sizeof(ui)));
-
-  chkerr(cudaMalloc((void **)&(flowNetwork.capacity),
-                    neighborSize * sizeof(double)));
-
-  chkerr(
-      cudaMalloc((void **)&(flowNetwork.flow), neighborSize * sizeof(double)));
+                                 ui vertexSize, ui neighborSize) {
 
   chkerr(cudaMalloc((void **)&(flowNetwork.height), (vertexSize) * sizeof(ui)));
-  chkerr(cudaMemset(flowNetwork.height, 0, (vertexSize) * sizeof(ui)));
   chkerr(cudaMalloc((void **)&(flowNetwork.excess),
                     (vertexSize) * sizeof(double)));
-  chkerr(cudaMemset(flowNetwork.excess, 0, vertexSize * sizeof(double)));
+
+  chkerr(cudaMalloc((void **)&(flowNetwork.foffset),
+                    (vertexSize + 1) * sizeof(ui)));
+  chkerr(cudaMalloc((void **)&(flowNetwork.fneighbors),
+                    neighborSize * sizeof(ui)));
+  chkerr(cudaMalloc((void **)&(flowNetwork.capacity),
+                    neighborSize * sizeof(double)));
+  chkerr(
+      cudaMalloc((void **)&(flowNetwork.fflow), neighborSize * sizeof(double)));
+
+  chkerr(cudaMalloc((void **)&(flowNetwork.boffset),
+                    (vertexSize + 1) * sizeof(ui)));
+  chkerr(cudaMalloc((void **)&(flowNetwork.bneighbors),
+                    neighborSize * sizeof(ui)));
+  chkerr(cudaMalloc((void **)&(flowNetwork.bflow), neighborSize * sizeof(ui)));
+  chkerr(
+      cudaMalloc((void **)&(flowNetwork.flowIndex), neighborSize * sizeof(ui)));
 
   cudaDeviceSynchronize();
 }
@@ -256,12 +259,11 @@ void freePruneneighbors(devicePrunedNeighbors &P) {
 }
 
 void freeFlownetwork(deviceFlowNetworkPointers &F) {
-  chkerr(cudaFree(F.offset));
-  chkerr(cudaFree(F.neighborOffset1));
-  chkerr(cudaFree(F.neighborOffset2));
-  chkerr(cudaFree(F.Edges));
-  chkerr(cudaFree(F.capacity));
-  chkerr(cudaFree(F.flow));
   chkerr(cudaFree(F.height));
   chkerr(cudaFree(F.excess));
+  chkerr(cudaFree(F.foffset));
+  chkerr(cudaFree(F.fneighbors));
+  chkerr(cudaFree(F.capacity));
+  chkerr(cudaFree(F.fflow));
+  chkerr(cudaFree(F.flowIndex));
 }

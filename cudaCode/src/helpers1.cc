@@ -111,12 +111,15 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
       }
       while (true) {
         if (*syncHelper == tFlow) {
+
           if (idx == 0) {
             *syncHelper = 0;
           }
           break;
         }
       }
+
+      // add another global varaible
       // __syncthreads();
 
       for (ui j = idx; j < total; j += TOTAL_THREAD) {

@@ -27,6 +27,7 @@
 #include <sys/stat.h>
 #include <utility>
 
+#define NUM_BLKS_PER_SM 1
 #define BLK_NUMS 216
 #define BLK_DIM 1024
 #define TOTAL_THREAD (BLK_NUMS * BLK_DIM)
@@ -58,10 +59,6 @@ typedef struct {
   ui *motifCount;
 } deviceGraphPointers;
 
-/*typedef struct  {
-    ui *adjacencyMatrix;
-}deviceMotifPointers;*/
-
 typedef struct {
 
   ui *componentOffset;
@@ -69,15 +66,6 @@ typedef struct {
   ui *mapping;
   ui *reverseMapping;
 } deviceComponentPointers;
-
-/*typedef struct  {
-
-    ui *maxDensity;
-    ui *numVertex;
-    ui *component;
-    ui *status;
-
-}deviceResultpointer;*/
 
 typedef struct {
   ui *offset;
@@ -134,30 +122,15 @@ typedef struct {
 } devicePrunedNeighbors;
 
 typedef struct {
-  ui *offset;
-  ui *neighborOffset1;
-  ui *neighborOffset2;
-  ui *Edges; // neighbors
-  double *capacity;
-  double *flow;
   ui *height;
   double *excess;
-
-} deviceFlowNetworkPointers;
-
-typedef struct {
-  ui *height;
-  ui *excess;
-  ui *foffset;
-  ui *fneighbors;
-  ui *capacities;
-  ui *fflow;
-  ui *boffset;
-  ui *rneighbors;
-  ui *bflow;
+  ui *offset;
+  ui *neighbors;
+  double *capacity;
+  double *flow;
   ui *flowIndex;
 
-} deviceFlownetwork;
+} deviceFlowNetworkPointers;
 
 extern deviceGraphPointers deviceGraph;
 extern deviceDAGpointer deviceDAG;
@@ -168,4 +141,3 @@ extern deviceComponentPointers conComp;
 extern devicePrunedNeighbors prunedNeighbors;
 extern deviceCliquesPointer finalCliqueData;
 extern deviceFlowNetworkPointers flowNetwork;
-extern deviceFlownetwork flownetwork;
