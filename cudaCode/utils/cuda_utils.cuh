@@ -13,6 +13,11 @@
 #include <thrust/sort.h>
 #include <thrust/transform.h>
 
+#include <cooperative_groups.h>
+#include <cuda.h>
+
+__device__ unsigned int globalCounter;
+
 // Macro to check for CUDA errors after kernel launches
 #define CUDA_CHECK_ERROR(kernelName)                                           \
   {                                                                            \
