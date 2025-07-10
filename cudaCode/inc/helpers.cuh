@@ -115,6 +115,10 @@ __global__ void preFlow(deviceFlowNetworkPointers flowNetwork,
                         deviceComponentPointers conComp, ui *compCounter,
                         double *totalExcess, ui iter);
 
-__global__ void push_relabel(deviceFlowNetworkPointers flowNetwork,
-                             deviceComponentPointers conComp, ui *compCounter,
-                             double *totalExcess, ui *activeNodes, ui iter);
+__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
+                            deviceComponentPointers conComp, ui *compCounter,
+                            double *totalExcess, ui *activeNodes, ui iter);
+__global__ void globalRelabel(deviceFlowNetworkPointers flowNetwork,
+                              deviceComponentPointers conComp, ui *compCounter,
+                              double *totalExcess, ui *activeNodes, ui *changes,
+                              ui k, ui iter);

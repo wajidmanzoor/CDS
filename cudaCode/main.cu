@@ -834,6 +834,23 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
                max_lowerBound);
 
   int iter = 0;
+  ui *gpuConverged;
+  chkerr(cudaMalloc((void **)&gpuConverged, sizeof(ui)));
+  ui cpuConverged = 0;
+  ui *changes;
+  chkerr(cudaMalloc((void **)&changes, sizeof(ui)));
+
+  ui *gpuSize;
+  double *gpuMaxDensity;
+  chkerr(cudaMalloc((void **)&gpuSize, sizeof(ui)));
+  chkerr(cudaMalloc((void **)&gpuMaxDensity, sizeof(double)));
+
+  ui cpuSize = 0;
+  double cpuMaxDensity = 0.0;
+
+  ui DSD_size = 0;
+  double DSD_density = 0;
+
   while (iter < totalComponents) {
     ui vertexSize, neighborSize;
     chkerr(cudaMemcpy(&vertexSize, flownetworkSize + iter, sizeof(ui),
@@ -1039,104 +1056,147 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
       size_t sharedMemSize = 3 * block_size.x * sizeof(int);
       ui *activeNodes;
       chkerr(cudaMalloc((void **)&activeNodes, neighborSize * sizeof(ui)));
-      void *kernel_args[] = {&flowNetwork, &conComp,     &compCounter,
-                             &totalExcess, &activeNodes, &iter};
 
-      // TODO add loop lb - ub > bais
-      while ((hostSourceExcess + hostSinkExcess) < hostTotalExcess) {
-        cudaLaunchCooperativeKernel((void *)push_relabel, num_blocks,
-                                    block_size, kernel_args, sharedMemSize, 0);
-        cudaDeviceSynchronize();
-        CUDA_CHECK_ERROR("Create Flow Network");
-        if (DEBUG) {
-          cout << "after relabel" << endl;
-          ui *offset, *neighbor, *index;
-          offset = new ui[vertexSize + 1];
-          neighbor = new ui[neighborSize];
-          index = new ui[neighborSize];
+      void *pushRelabelKernelArgs[] = {&flowNetwork, &conComp,     &compCounter,
+                                       &totalExcess, &activeNodes, &iter};
 
-          double *cap, *flow;
-          cap = new double[neighborSize];
-          flow = new double[neighborSize];
+      void *globalRelabelKernelArgs[] = {&flowNetwork, &conComp, &compCounter,
+                                         &changes,     &k,       &iter};
 
-          ui *height;
-          double *excess;
-          height = new ui[vertexSize];
-          excess = new double[vertexSize];
+      void *updateFlownetworkKernelArgs[] = {
+          &flowNetwork, &conComp,         &compCounter, &upperBound,
+          &lowerBound,  &gpuConverged,    &gpuSize,     &gpuMaxDensity,
+          &k,           &newTotaLCliques, &iter};
 
-          cudaMemcpy(offset, flowNetwork.offset, (vertexSize + 1) * sizeof(ui),
-                     cudaMemcpyDeviceToHost);
+      chkerr(cudaMemset(gpuConverged, 0, sizeof(ui)));
+      while (!cpuConverged) {
+        while ((hostSourceExcess + hostSinkExcess) < hostTotalExcess) {
+          cudaLaunchCooperativeKernel((void *)pushRelabel, num_blocks,
+                                      block_size, pushRelabelKernelArgs,
+                                      sharedMemSize, 0);
+          cudaDeviceSynchronize();
+          CUDA_CHECK_ERROR("Push Relabel");
+          if (DEBUG) {
+            cout << "after relabel" << endl;
+            ui *offset, *neighbor, *index;
+            offset = new ui[vertexSize + 1];
+            neighbor = new ui[neighborSize];
+            index = new ui[neighborSize];
 
-          cudaMemcpy(neighbor, flowNetwork.neighbors,
-                     (neighborSize) * sizeof(ui), cudaMemcpyDeviceToHost);
+            double *cap, *flow;
+            cap = new double[neighborSize];
+            flow = new double[neighborSize];
 
-          cudaMemcpy(index, flowNetwork.flowIndex, (neighborSize) * sizeof(ui),
-                     cudaMemcpyDeviceToHost);
-          cudaMemcpy(cap, flowNetwork.capacity, (neighborSize) * sizeof(double),
-                     cudaMemcpyDeviceToHost);
-          cudaMemcpy(flow, flowNetwork.flow, (neighborSize) * sizeof(double),
-                     cudaMemcpyDeviceToHost);
+            ui *height;
+            double *excess;
+            height = new ui[vertexSize];
+            excess = new double[vertexSize];
 
-          cudaMemcpy(height, flowNetwork.height, (vertexSize) * sizeof(ui),
-                     cudaMemcpyDeviceToHost);
-          cudaMemcpy(excess, flowNetwork.excess, (vertexSize) * sizeof(double),
-                     cudaMemcpyDeviceToHost);
+            cudaMemcpy(offset, flowNetwork.offset,
+                       (vertexSize + 1) * sizeof(ui), cudaMemcpyDeviceToHost);
 
-          cout << "offset ";
-          for (ui i = 0; i < vertexSize + 1; i++) {
-            cout << offset[i] << " ";
+            cudaMemcpy(neighbor, flowNetwork.neighbors,
+                       (neighborSize) * sizeof(ui), cudaMemcpyDeviceToHost);
+
+            cudaMemcpy(index, flowNetwork.flowIndex,
+                       (neighborSize) * sizeof(ui), cudaMemcpyDeviceToHost);
+            cudaMemcpy(cap, flowNetwork.capacity,
+                       (neighborSize) * sizeof(double), cudaMemcpyDeviceToHost);
+            cudaMemcpy(flow, flowNetwork.flow, (neighborSize) * sizeof(double),
+                       cudaMemcpyDeviceToHost);
+
+            cudaMemcpy(height, flowNetwork.height, (vertexSize) * sizeof(ui),
+                       cudaMemcpyDeviceToHost);
+            cudaMemcpy(excess, flowNetwork.excess,
+                       (vertexSize) * sizeof(double), cudaMemcpyDeviceToHost);
+
+            cout << "offset ";
+            for (ui i = 0; i < vertexSize + 1; i++) {
+              cout << offset[i] << " ";
+            }
+            cout << endl;
+
+            cout << "Neigh ";
+            for (ui i = 0; i < neighborSize; i++) {
+              cout << neighbor[i] << " ";
+            }
+            cout << endl;
+
+            cout << "index ";
+            for (ui i = 0; i < neighborSize; i++) {
+              cout << index[i] << " ";
+            }
+            cout << endl;
+
+            cout << "cap ";
+            for (ui i = 0; i < neighborSize; i++) {
+              cout << cap[i] << " ";
+            }
+            cout << endl;
+
+            cout << "flow ";
+            for (ui i = 0; i < neighborSize; i++) {
+              cout << flow[i] << " ";
+            }
+            cout << endl;
+
+            cout << "height ";
+            for (ui i = 0; i < vertexSize; i++) {
+              cout << height[i] << " ";
+            }
+            cout << endl;
+
+            cout << "excess ";
+            for (ui i = 0; i < vertexSize; i++) {
+              cout << excess[i] << " ";
+            }
+            cout << endl;
+
+            double te;
+            cudaMemcpy(&te, totalExcess, sizeof(double),
+                       cudaMemcpyDeviceToHost);
+            cout << "TOTAL EXCESS " << te << endl;
           }
-          cout << endl;
-
-          cout << "Neigh ";
-          for (ui i = 0; i < neighborSize; i++) {
-            cout << neighbor[i] << " ";
-          }
-          cout << endl;
-
-          cout << "index ";
-          for (ui i = 0; i < neighborSize; i++) {
-            cout << index[i] << " ";
-          }
-          cout << endl;
-
-          cout << "cap ";
-          for (ui i = 0; i < neighborSize; i++) {
-            cout << cap[i] << " ";
-          }
-          cout << endl;
-
-          cout << "flow ";
-          for (ui i = 0; i < neighborSize; i++) {
-            cout << flow[i] << " ";
-          }
-          cout << endl;
-
-          cout << "height ";
-          for (ui i = 0; i < vertexSize; i++) {
-            cout << height[i] << " ";
-          }
-          cout << endl;
-
-          cout << "excess ";
-          for (ui i = 0; i < vertexSize; i++) {
-            cout << excess[i] << " ";
-          }
-          cout << endl;
-
-          double te;
-          cudaMemcpy(&te, totalExcess, sizeof(double), cudaMemcpyDeviceToHost);
-          cout << "TOTAL EXCESS " << te << endl;
+          chkerr(cudaMemset(changes, 0, sizeof(ui)));
+          cudaLaunchCooperativeKernel((void *)globalRelabel, num_blocks,
+                                      block_size, globalRelabelKernelArgs, 0,
+                                      nullptr);
+          cudaDeviceSynchronize();
+          CUDA_CHECK_ERROR("Global Relabel");
+          chkerr(cudaMemcpy(&hostSourceExcess,
+                            flowNetwork.excess + vertexSize - 2, sizeof(double),
+                            cudaMemcpyDeviceToHost));
+          chkerr(cudaMemcpy(&hostSinkExcess,
+                            flowNetwork.excess + vertexSize - 1, sizeof(double),
+                            cudaMemcpyDeviceToHost));
+          chkerr(cudaMemcpy(&hostTotalExcess, totalExcess, sizeof(double),
+                            cudaMemcpyDeviceToHost));
         }
-        // TODO ADD global relabel
-        break;
+        chkerr(cudaMemset(gpuMaxDensity, 0, sizeof(double)));
+        chkerr(cudaMemset(gpuSize, 0, sizeof(ui)));
+
+        cudaLaunchCooperativeKernel((void *)updateFlownetwork, num_blocks,
+                                    block_size, updateFlownetworkKernelArgs, 0,
+                                    nullptr);
+        cudaDeviceSynchronize();
+        CUDA_CHECK_ERROR("Update  flow Network");
+        chkerr(cudaMemcpy(&cpuConverged, gpuConverged, sizeof(ui),
+                          cudaMemcpyDeviceToHost));
+        chkerr(
+            cudaMemcpy(&cpuSize, gpuSize, sizeof(ui), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(&cpuMaxDensity, gpuMaxDensity, sizeof(double),
+                          cudaMemcpyDeviceToHost));
+
+        if (cpuMaxDensity > DSD_density) {
+          DSD_density = cpuMaxDensity;
+          DSD_size = cpuSize;
+        }
       }
-      // TODO get results and update the flownetwork
+
       cudaFree(totalExcess);
     }
     freeFlownetwork(flowNetwork);
     iter++;
-    break;
   }
 }
 

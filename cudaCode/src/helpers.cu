@@ -1247,9 +1247,9 @@ __global__ void preFlow(deviceFlowNetworkPointers flowNetwork,
   }
 }
 
-__global__ void push_relabel(deviceFlowNetworkPointers flowNetwork,
-                             deviceComponentPointers conComp, ui *compCounter,
-                             double *totalExcess, ui *activeNodes, ui iter) {
+__global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
+                            deviceComponentPointers conComp, ui *compCounter,
+                            double *totalExcess, ui *activeNodes, ui iter) {
 
   grid_group grid = this_grid();
   cg::thread_block block = cg::this_thread_block();
@@ -1265,7 +1265,7 @@ __global__ void push_relabel(deviceFlowNetworkPointers flowNetwork,
   ui start = conComp.componentOffset[iter];
   ui end = conComp.componentOffset[iter + 1];
   ui total = end - start;
-  ui startClique = compCounter[iter];
+  // ui startClique = compCounter[iter];
   ui totalCliques = compCounter[iter + 1] - compCounter[iter];
   int totalFlow = total + totalCliques + 2;
   int cycle = totalFlow;
@@ -1321,5 +1321,132 @@ __global__ void push_relabel(deviceFlowNetworkPointers flowNetwork,
     }
     grid.sync();
     cycle = cycle - 1;
+  }
+}
+
+__global__ void globalRelabel(deviceFlowNetworkPointers flowNetwork,
+                              deviceComponentPointers conComp, ui *compCounter,
+                              double *totalExcess, ui *activeNodes, ui *changes,
+                              ui k, ui iter) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  grid_group grid = this_grid();
+
+  ui start = conComp.componentOffset[iter];
+  ui end = conComp.componentOffset[iter + 1];
+  ui total = end - start;
+  ui totalCliques = compCounter[iter + 1] - compCounter[iter];
+
+  for (ui i = idx; i < total; i += TOTAL_THREAD) {
+    ui vertexOffset = flowNetwork.offset[i];
+    if (flowNetwork.flow[vertexOffset] > 1e-8) {
+      flowNetwork.height[i] = 1;
+    }
+  }
+  grid.sync();
+
+  for (ui i = idx; i < totalCliques; i += TOTAL_THREAD) {
+    ui cliqueOffset = flowNetwork.offset[total + i];
+    // ui v = flowNetwork.neighbors[cliqueOffset];
+    for (ui j = 0; j < k; j++) {
+      if (flowNetwork.flow[cliqueOffset + j] > 1e-8) {
+        if (flowNetwork.height[flowNetwork.neighbors[cliqueOffset + j]] == 1) {
+          flowNetwork.height[total + i] = 2;
+          break;
+        }
+      }
+    }
+  }
+  grid.sync();
+  for (ui i = idx; i < total; i += TOTAL_THREAD) {
+    ui sourceOffset = flowNetwork.offset[total + totalCliques];
+    if (flowNetwork.flow[sourceOffset + i] > 1e-8) {
+      ui v = flowNetwork.neighbors[sourceOffset + i];
+      if (flowNetwork.height[v] == 1) {
+        atomicCAS(changes, 0, 1);
+      }
+    }
+  }
+  grid.sync();
+  if (idx == 0) {
+    if (*changes == 1) {
+      flowNetwork.height[total + totalCliques] = 2;
+    }
+  }
+}
+
+__global__ void updateFlownetwork(deviceFlowNetworkPointers flowNetwork,
+                                  deviceComponentPointers conComp,
+                                  ui *compCounter, double *upperBound,
+                                  double *lowerBound, ui *gpuConverged,
+                                  ui *gpuSize, ui *gpuMaxDensity, ui k, ui t,
+                                  ui iter) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  grid_group grid = this_grid();
+
+  ui start = conComp.componentOffset[iter];
+  ui end = conComp.componentOffset[iter + 1];
+  ui total = end - start;
+  ui cliqueStart = compCounter[iter];
+  ui totalCliques = compCounter[iter + 1] - compCounter[iter];
+  ui tFlow = total + totalCliques + 2;
+
+  double bais = 1.0 / (total * (total - 1));
+  double temp = static_cast<double>(totalCliques) * k;
+
+  if (fabs(flowNetwork.excess[tFlow - 1] - temp) > 1e-8) {
+    ui sourceOffset = flowNetwork.offset[total + totalCliques];
+    for (ui i = idx; i < total; i += TOTAL_THREAD) {
+      if (flowNetwork.flow[sourceOffset + i] > 1e-8) {
+        atomicAdd(gpuSize, 1);
+      }
+    }
+
+    grid.sync();
+
+    for (ui i = idx; i < totalCliques; i += TOTAL_THREAD) {
+      ui j = 0;
+      ui found = true;
+      while (j < k) {
+        ui vertex =
+            conComp.reverseMapping[finalCliqueData[j * t + i + cliqueStart]] -
+            start;
+
+        if (flowNetwork.flow[sourceOffset + vertex] <= 1e-8) {
+          found = false;
+          break
+        }
+        j++;
+      }
+
+      if (found) {
+        atomicAdd(gpuMaxDensity, 1);
+      }
+    }
+    grid.sync();
+    if (idx == 0) {
+      *gpuMaxDensity = *gpuMaxDensity / (*gpuSize);
+    }
+  }
+
+  if (idx == 0) {
+    if (fabs(flowNetwork.excess[tFlow - 1] - temp) < 1e-8) {
+      upperBound[iter] = alpha;
+    } else {
+      lowerBound[iter] = alpha;
+    }
+
+    if ((upperBound[iter] - lowerBound[iter]) < bais) {
+      *gpuConverged = 1;
+    }
+  }
+  grid.sync();
+
+  if (!*gpuConverged) {
+    double alpha = (upperBound[iter] + lowerBound[iter]) / 2;
+
+    for (ui i = idx; i < total; i += TOTAL_THREAD) {
+      ui vertexOffset = flowNetwork.neighbors[i];
+      flowNetwork.capacity[vertexOffset] = alpha * k;
+    }
   }
 }
