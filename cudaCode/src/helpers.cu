@@ -1,6 +1,12 @@
 #include "../inc/helpers.cuh"
 #include "../utils/cuda_utils.cuh"
 
+#define ASSERT_DEBUG(cond, fmt, ...)                                           \
+  if (!(cond)) {                                                               \
+    printf("ASSERT FAILED at %s:%d: " fmt, __FILE__, __LINE__, ##__VA_ARGS__); \
+    assert(false);                                                             \
+  }
+
 using namespace cooperative_groups;
 namespace cg = cooperative_groups;
 
@@ -168,98 +174,114 @@ __global__ void generateNeighborDAG(deviceGraphPointers G, deviceDAGpointer D,
 
 __global__ void listIntialCliques(deviceDAGpointer D,
                                   cliqueLevelDataPointer levelData, ui *label,
-                                  ui k, ui n, ui m, ui psize, ui cpSize,
-                                  ui maxBitMask, ui level, ui totalWarps) {
+                                  ui k, ui n, ui psize, ui cpSize,
+                                  ui maxBitMask, ui level, ui totalWarps,
+                                  size_t partialSize, size_t candidateSize,
+                                  size_t maskSize, size_t offsetSize) {
   extern __shared__ char sharedMemory[];
-  ui sizeOffset = 0;
-
-  ui *counter = (ui *)(sharedMemory + sizeOffset);
+  ui *counter = (ui *)sharedMemory;
 
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   int warpId = idx / warpSize;
   int laneId = idx % warpSize;
-  int cliquePartition = warpId * psize;
-  int offsetPartition = warpId * (psize / (k - 1) + 1);
-  int candidatePartition = warpId * cpSize;
-  int maskPartition = warpId * cpSize * maxBitMask;
 
-  // Each Warp processes on vertex
-  for (int i = warpId; i < n; i += totalWarps) {
+  size_t oP = (size_t)warpId * psize;
+  size_t oCP = (size_t)warpId * cpSize;
+  size_t oO = (size_t)warpId * ((psize / (k - 1)) + 1);
+  size_t oM = oCP * maxBitMask;
+  size_t bitCap = ((size_t)TOTAL_WARPS * n + 7) >> 3;
 
-    ui vertex = i;
-    ui neighOffset = D.offset[vertex];
-    if (laneId == 0) {
+  for (ui i = warpId; i < n; i += totalWarps) {
+    ui vertex = i, vOff = D.offset[vertex];
+
+    if (laneId == 0)
       counter[threadIdx.x / warpSize] = 0;
-    }
-
     __syncwarp();
 
-    int candidateOffset =
-        candidatePartition +
-        levelData
-            .offsetPartition[offsetPartition + levelData.count[warpId + 1]];
+    ui cidx = levelData.count[warpId + 1];
+    size_t cOff = oCP + levelData.offsetPartition[oO + cidx];
 
-    // Iter through neighbors of vertex and add to candidate in label = k.
-    for (int j = laneId; j < D.degree[vertex]; j += warpSize) {
-      ui neigh = D.neighbors[neighOffset + j];
+    for (ui j = laneId; j < D.degree[vertex]; j += warpSize) {
+      ui neigh = D.neighbors[vOff + j];
+      size_t bit = (size_t)warpId * n + neigh;
+      size_t bIdx = bit / 8;
+      uint8_t mask = 1 << (bit % 8);
 
-      ui old_val = atomicCAS(&label[warpId * n + neigh], k, k - 1);
-      if (old_val == k) {
-        ui loc = atomicAdd(&counter[threadIdx.x / warpSize], 1);
-        levelData.candidatesPartition[candidateOffset + loc] = neigh;
-      }
-    }
-    __syncwarp();
+      if (bIdx < bitCap) {
+        uint8_t old = atomicOr(&label[bIdx], mask);
+        if (!(old & mask)) {
+          ui loc = atomicAdd(&counter[threadIdx.x / warpSize], 1);
+          size_t w = cOff + loc;
+          if (w < candidateSize) {
+            levelData.candidatesPartition[w] = neigh;
 
-    // Offset and PC added
-    if (laneId == 0 && counter[threadIdx.x / warpSize] > 0) {
-      levelData.partialCliquesPartition[cliquePartition +
-                                        levelData.count[warpId + 1] * (k - 1) +
-                                        level] = vertex;
-      levelData.count[warpId + 1] += 1;
-      levelData.offsetPartition[offsetPartition + levelData.count[warpId + 1]] =
-          levelData.offsetPartition[offsetPartition +
-                                    levelData.count[warpId + 1] - 1] +
-          counter[threadIdx.x / warpSize];
-    }
-    __syncwarp();
-
-    int start = candidateOffset;
-    for (int j = laneId; j < counter[threadIdx.x / warpSize]; j += warpSize) {
-      int candidate = levelData.candidatesPartition[start + j];
-      int neighOffset = D.offset[candidate];
-      int degree = D.degree[candidate];
-
-      int numBitmasks = (degree + 31) / 32;
-
-      for (int bitmaskIndex = 0; bitmaskIndex < numBitmasks; bitmaskIndex++) {
-        ui bitmask = 0; // Initialize bitmask to 0
-
-        // Iterate over the current chunk of 32 neighbors
-        int startNeighbor = bitmaskIndex * 32;
-        int endNeighbor = min(startNeighbor + 32, degree);
-        for (int x = startNeighbor; x < endNeighbor; x++) {
-
-          if (label[warpId * n + D.neighbors[neighOffset + x]] == k - 1) {
-            bitmask |=
-                (1 << (x - startNeighbor)); // Set the bit for valid neighbors
+          } else {
+            printf("OOB cand[%lu] warp %d\n", w, warpId);
           }
         }
-
-        levelData.validNeighMaskPartition
-            [maskPartition +
-             (levelData.offsetPartition[offsetPartition +
-                                        levelData.count[warpId + 1] - 1] +
-              j) *
-                 maxBitMask +
-             bitmaskIndex] = bitmask;
+      } else {
+        printf("OOB label set[%lu] warp %d\n", bIdx, warpId);
       }
     }
 
     __syncwarp();
 
-    for (int x = laneId; x < n; x += 32) {
-      label[warpId * n + x] = k;
+    if (laneId == 0 && counter[threadIdx.x / warpSize] > 0) {
+      size_t w = oP + levelData.count[warpId + 1] * (k - 1) + level;
+      if (w < partialSize)
+        levelData.partialCliquesPartition[w] = vertex;
+      else
+        printf("OOB clique[%lu] warp %d\n", w, warpId);
+
+      levelData.count[warpId + 1] += 1;
+
+      size_t next = oO + levelData.count[warpId + 1];
+      if (next < offsetSize)
+        levelData.offsetPartition[next] = levelData.offsetPartition[next - 1] +
+                                          counter[threadIdx.x / warpSize];
+      else
+        printf("OOB offset[%lu] warp %d\n", next, warpId);
+    }
+
+    __syncwarp();
+
+    for (ui j = laneId; j < counter[threadIdx.x / warpSize]; j += warpSize) {
+      ui cand = levelData.candidatesPartition[cOff + j];
+      ui dOff = D.offset[cand], deg = D.degree[cand], chunks = (deg + 31) / 32;
+
+      for (ui m = 0; m < chunks; m++) {
+        ui bitmask = 0, from = m * 32, to = min(from + 32, deg);
+        for (ui x = from; x < to; x++) {
+          ui nb = D.neighbors[dOff + x];
+          size_t bit = (size_t)warpId * n + nb;
+          size_t bIdx = bit / 8;
+          uint8_t msk = 1 << (bit % 8);
+
+          if ((label[bIdx] & msk) != 0)
+            bitmask |= 1 << (x - from);
+        }
+
+        size_t base =
+            levelData.offsetPartition[oO + levelData.count[warpId + 1] - 1];
+        size_t maskIdx = oM + (base + j) * maxBitMask + m;
+
+        if (maskIdx < maskSize)
+          levelData.validNeighMaskPartition[maskIdx] = bitmask;
+        else
+          printf("OOB mask[%lu] warp %d\n", maskIdx, warpId);
+      }
+    }
+
+    __syncwarp();
+
+    for (ui x = laneId; x < n; x += warpSize) {
+      size_t bit = (size_t)warpId * n + x;
+      size_t bIdx = bit / 8;
+      uint8_t msk = ~(1 << (bit % 8));
+      if (bIdx < bitCap)
+        atomicAnd(&label[bIdx], msk);
+      else
+        printf("OOB label clr[%lu] warp %d\n", bIdx, warpId);
     }
 
     __syncwarp();
@@ -369,8 +391,14 @@ __global__ void listMidCliques(deviceDAGpointer D,
             levelData.validNeighMask[(start + iter) * maxBitMask + iterBitMask];
         ui neigh = D.neighbors[neighOffset + j];
         if (neighBitMask & (1 << bitPos)) {
-          ui old_val = atomicCAS(&label[warpId * n + neigh], iterK, iterK - 1);
-          if (old_val == iterK) {
+          size_t bitIndex = static_cast<size_t>(warpId) * n + neigh;
+          size_t byteIdx = bitIndex / 8;
+          uint8_t btMask = 1 << (bitIndex % 8);
+
+          uint8_t oldByte = atomicOr(&label[byteIdx], btMask);
+          // ui old_val = atomicCAS(&label[warpId * n + neigh], iterK, iterK -
+          // 1);
+          if (!(oldByte & btMask)) {
             ui loc = atomicAdd(&counter[threadIdx.x / warpSize], 1);
             levelData.candidatesPartition[writeOffset + loc] = neigh;
           }
@@ -412,9 +440,12 @@ __global__ void listMidCliques(deviceDAGpointer D,
           int startNeighbor = bitmaskIndex * 32;
           int endNeighbor = min(startNeighbor + 32, degree);
           for (int x = startNeighbor; x < endNeighbor; x++) {
+            size_t bitIndex =
+                static_cast<size_t>(warpId) * n + D.neighbors[neighOffset + x];
+            size_t byteIdx = bitIndex / 8;
+            uint8_t btMask = 1 << (bitIndex % 8);
 
-            if (label[warpId * n + D.neighbors[neighOffset + x]] ==
-                (iterK - 1)) {
+            if ((label[byteIdx] & btMask) != 0) {
               bitmask |=
                   (1 << (x - startNeighbor)); // Set the bit for valid neighbors
             }
@@ -433,7 +464,12 @@ __global__ void listMidCliques(deviceDAGpointer D,
       __syncwarp();
 
       for (int x = laneId; x < n; x += 32) {
-        label[warpId * n + x] = iterK;
+        size_t bitIndex = static_cast<size_t>(warpId) * n + x;
+        size_t byteIdx = bitIndex / 8;
+        uint8_t btMask = ~(1 << (bitIndex % 8)); // inverted mask
+
+        // Atomically clear the bit
+        atomicAnd(&label[byteIdx], btMask);
       }
 
       __syncwarp();
@@ -1326,8 +1362,7 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
 
 __global__ void globalRelabel(deviceFlowNetworkPointers flowNetwork,
                               deviceComponentPointers conComp, ui *compCounter,
-                              double *totalExcess, ui *activeNodes, ui *changes,
-                              ui k, ui iter) {
+                              ui *changes, ui k, ui iter) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   grid_group grid = this_grid();
 
@@ -1342,6 +1377,7 @@ __global__ void globalRelabel(deviceFlowNetworkPointers flowNetwork,
       flowNetwork.height[i] = 1;
     }
   }
+
   grid.sync();
 
   for (ui i = idx; i < totalCliques; i += TOTAL_THREAD) {
@@ -1368,6 +1404,7 @@ __global__ void globalRelabel(deviceFlowNetworkPointers flowNetwork,
   }
   grid.sync();
   if (idx == 0) {
+    flowNetwork.height[total + totalCliques - 1] = 0;
     if (*changes == 1) {
       flowNetwork.height[total + totalCliques] = 2;
     }
@@ -1376,10 +1413,11 @@ __global__ void globalRelabel(deviceFlowNetworkPointers flowNetwork,
 
 __global__ void updateFlownetwork(deviceFlowNetworkPointers flowNetwork,
                                   deviceComponentPointers conComp,
+                                  deviceCliquesPointer finalCliqueData,
                                   ui *compCounter, double *upperBound,
                                   double *lowerBound, ui *gpuConverged,
-                                  ui *gpuSize, ui *gpuMaxDensity, ui k, ui t,
-                                  ui iter) {
+                                  ui *gpuSize, double *gpuMaxDensity, ui k,
+                                  ui t, ui iter) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   grid_group grid = this_grid();
 
@@ -1408,12 +1446,13 @@ __global__ void updateFlownetwork(deviceFlowNetworkPointers flowNetwork,
       ui found = true;
       while (j < k) {
         ui vertex =
-            conComp.reverseMapping[finalCliqueData[j * t + i + cliqueStart]] -
+            conComp
+                .reverseMapping[finalCliqueData.trie[j * t + i + cliqueStart]] -
             start;
 
         if (flowNetwork.flow[sourceOffset + vertex] <= 1e-8) {
           found = false;
-          break
+          break;
         }
         j++;
       }
@@ -1426,7 +1465,16 @@ __global__ void updateFlownetwork(deviceFlowNetworkPointers flowNetwork,
     if (idx == 0) {
       *gpuMaxDensity = *gpuMaxDensity / (*gpuSize);
     }
+  } else {
+    if (idx == 0) {
+      *gpuMaxDensity = lowerBound[iter];
+      // printf("max density %f iter %u lb %f \n",
+      // *gpuMaxDensity,iter,lowerBound[iter]);
+      *gpuSize = total;
+    }
   }
+  grid.sync();
+  double alpha = (upperBound[iter] + lowerBound[iter]) / 2;
 
   if (idx == 0) {
     if (fabs(flowNetwork.excess[tFlow - 1] - temp) < 1e-8) {
@@ -1442,7 +1490,6 @@ __global__ void updateFlownetwork(deviceFlowNetworkPointers flowNetwork,
   grid.sync();
 
   if (!*gpuConverged) {
-    double alpha = (upperBound[iter] + lowerBound[iter]) / 2;
 
     for (ui i = idx; i < total; i += TOTAL_THREAD) {
       ui vertexOffset = flowNetwork.neighbors[i];

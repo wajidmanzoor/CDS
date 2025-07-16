@@ -11,8 +11,11 @@ __global__ void generateNeighborDAG(deviceGraphPointers G, deviceDAGpointer D,
                                     ui totalWarps);
 __global__ void listIntialCliques(deviceDAGpointer D,
                                   cliqueLevelDataPointer levelData, ui *label,
-                                  ui k, ui n, ui m, ui psize, ui cpSize,
-                                  ui maxBitMask, ui level, ui totalWarps);
+                                  ui k, ui n, ui psize, ui cpSize,
+                                  ui maxBitMask, ui level, ui totalWarps,
+                                  size_t partialSize, size_t candidateSize,
+                                  size_t maskSize, size_t offsetSize);
+
 __global__ void flushParitions(deviceDAGpointer D,
                                cliqueLevelDataPointer levelData, ui pSize,
                                ui cpSize, ui k, ui maxBitMask, ui level,
@@ -120,5 +123,11 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
                             double *totalExcess, ui *activeNodes, ui iter);
 __global__ void globalRelabel(deviceFlowNetworkPointers flowNetwork,
                               deviceComponentPointers conComp, ui *compCounter,
-                              double *totalExcess, ui *activeNodes, ui *changes,
-                              ui k, ui iter);
+                              ui *changes, ui k, ui iter);
+__global__ void updateFlownetwork(deviceFlowNetworkPointers flowNetwork,
+                                  deviceComponentPointers conComp,
+                                  deviceCliquesPointer finalCliqueData,
+                                  ui *compCounter, double *upperBound,
+                                  double *lowerBound, ui *gpuConverged,
+                                  ui *gpuSize, double *gpuMaxDensity, ui k,
+                                  ui t, ui iter);

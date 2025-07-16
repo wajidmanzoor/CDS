@@ -52,11 +52,11 @@ void memoryAllocationTrie(deviceCliquesPointer &C, ui t, ui k) {
 
 ui memoryAllocationlevelData(cliqueLevelDataPointer &L, ui k, ui pSize,
                              ui cpSize, ui maxDegree, ui totalWarps) {
-  ui partialSize = totalWarps * pSize;
-  ui candidateSize = totalWarps * cpSize;
-  ui offsetSize = ((pSize / (k - 1)) + 1) * totalWarps;
+  size_t partialSize = (size_t)totalWarps * pSize;
+  size_t candidateSize = (size_t)totalWarps * cpSize;
+  size_t offsetSize = (size_t)((pSize / (k - 1)) + 1) * totalWarps;
   ui maxBitMask = (maxDegree + 31) / 32;
-  ui maskSize = (cpSize * maxBitMask) * totalWarps;
+  size_t maskSize = (size_t)cpSize * maxBitMask * totalWarps;
   ui max_ = partialSize / (k - 1);
 
   chkerr(cudaMalloc((void **)&(L.partialCliquesPartition),
@@ -84,8 +84,10 @@ ui memoryAllocationlevelData(cliqueLevelDataPointer &L, ui k, ui pSize,
   chkerr(cudaMalloc((void **)&(L.temp), (totalWarps + 1) * sizeof(ui)));
   chkerr(cudaMemset(L.temp, 0, (totalWarps + 1) * sizeof(ui)));
   chkerr(cudaMemset(L.count, 0, (totalWarps + 1) * sizeof(ui)));
+
   chkerr(cudaMalloc((void **)&(L.max), sizeof(ui)));
   chkerr(cudaMemcpy(L.max, &max_, sizeof(ui), cudaMemcpyHostToDevice));
+
   cudaDeviceSynchronize();
   return maxBitMask;
 }

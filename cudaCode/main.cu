@@ -8,6 +8,7 @@
 
 #include <cooperative_groups.h>
 #include <cub/cub.cuh>
+#include <iomanip>
 #include <thrust/async/copy.h>
 #include <thrust/binary_search.h>
 #include <thrust/sequence.h>
@@ -115,23 +116,36 @@ ui listAllCliques(const Graph &graph, deviceGraphPointers &deviceGraph,
 
   // labels used to avoid duplicates.
   ui *labels;
-  chkerr(cudaMalloc((void **)&(labels), (graph.n * TOTAL_WARPS) * sizeof(ui)));
-  thrust::device_ptr<ui> dev_labels(labels);
-  thrust::fill(dev_labels, dev_labels + graph.n * TOTAL_WARPS, iterK);
+  size_t numBits = static_cast<size_t>(graph.n) * TOTAL_WARPS;
+  size_t numBytes = (numBits + 7) / 8;
+  chkerr(cudaMalloc((void **)&(labels), (numBytes)));
+  cudaMemset(labels, 0, numBytes);
+  // thrust::device_ptr<ui> dev_labels(labels);
+  // thrust::fill(dev_labels, dev_labels + total_size, iterK);
 
   chkerr(cudaMemcpy(deviceGraph.degree, graph.degree.data(),
                     graph.n * sizeof(ui), cudaMemcpyHostToDevice));
   chkerr(cudaMemset(levelData.partialCliquesPartition, 0,
                     (TOTAL_WARPS * pSize) * sizeof(ui)));
+  cudaDeviceSynchronize();
 
   size_t sharedMemoryIntialClique = WARPS_EACH_BLK * sizeof(ui);
 
   // Generates initial partial cliques, their candidate extensions, and valid
   // neighbor masks. The data is stored in virtual partitions, with each warp
   // writing to a separate partition.
+
+  cout << "psize " << pSize << endl;
+  cout << "cpSize" << cpSize << endl;
+
+  size_t partialSize1 = TOTAL_WARPS * pSize;
+  size_t candidateSize = TOTAL_WARPS * cpSize;
+  size_t offsetSize1 = ((pSize / (k - 1)) + 1) * TOTAL_WARPS;
+  size_t maskSize = candidateSize * maxBitMask;
+
   listIntialCliques<<<BLK_NUMS, BLK_DIM, sharedMemoryIntialClique>>>(
-      deviceDAG, levelData, labels, iterK, graph.n, graph.m, pSize, cpSize,
-      maxBitMask, level, TOTAL_WARPS);
+      deviceDAG, levelData, labels, k, graph.n, pSize, cpSize, maxBitMask,
+      level, TOTAL_WARPS, partialSize1, candidateSize, maskSize, offsetSize1);
   cudaDeviceSynchronize();
   CUDA_CHECK_ERROR("Generate Intial Partial Cliques");
 
@@ -142,6 +156,7 @@ ui listAllCliques(const Graph &graph, deviceGraphPointers &deviceGraph,
   // Used to compute offsets so that partial cliques, candidates, and valid
   // neighbors can be copied from virtual partition to  contiguous array.
   createLevelDataOffset(levelData, offsetPartitionSize, TOTAL_WARPS);
+  cudaDeviceSynchronize();
 
   // write partial cliques, candidates and valid neighbor bitmask from virtual
   // partition to single arrays.
@@ -157,18 +172,22 @@ ui listAllCliques(const Graph &graph, deviceGraphPointers &deviceGraph,
   int totalTasks;
   chkerr(cudaMemcpy(&totalTasks, levelData.count + TOTAL_WARPS, sizeof(ui),
                     cudaMemcpyDeviceToHost));
+  cudaDeviceSynchronize();
+
   size_t sharedMemoryMid = WARPS_EACH_BLK * sizeof(ui);
 
   while (iterK > 2) {
 
-    thrust::device_ptr<ui> dev_labels(labels);
-    thrust::fill(dev_labels, dev_labels + graph.n * TOTAL_WARPS, iterK);
+    // thrust::device_ptr<ui> dev_labels(labels);
+    // thrust::fill(dev_labels, dev_labels + graph.n * TOTAL_WARPS, iterK);
+    cudaMemset(labels, 0, numBytes);
 
     chkerr(cudaMemset(levelData.count, 0, (TOTAL_WARPS + 1) * sizeof(ui)));
     chkerr(cudaMemset(levelData.temp, 0, (TOTAL_WARPS + 1) * sizeof(ui)));
     chkerr(cudaMemset(levelData.offsetPartition, 0, (offsetSize) * sizeof(ui)));
     chkerr(cudaMemset(levelData.validNeighMaskPartition, 0,
                       (partialSize * maxBitMask) * sizeof(ui)));
+    cudaDeviceSynchronize();
 
     // Add verticies to partial cliques from initial kernel.
     listMidCliques<<<BLK_NUMS, BLK_DIM, sharedMemoryMid>>>(
@@ -185,6 +204,7 @@ ui listAllCliques(const Graph &graph, deviceGraphPointers &deviceGraph,
     chkerr(cudaMemset(levelData.offset, 0, offsetSize * sizeof(ui)));
     chkerr(cudaMemset(levelData.validNeighMask, 0,
                       partialSize * maxBitMask * sizeof(ui)));
+    cudaDeviceSynchronize();
 
     // write partial cliques, candidates and valid neighbor bitmask from virtual
     // partition to single arrays.
@@ -196,6 +216,7 @@ ui listAllCliques(const Graph &graph, deviceGraphPointers &deviceGraph,
     // Get total partial cliques (tasks) for next level.
     chkerr(cudaMemcpy(&totalTasks, levelData.count + TOTAL_WARPS, sizeof(ui),
                       cudaMemcpyDeviceToHost));
+    cudaDeviceSynchronize();
 
     iterK--;
     level++;
@@ -207,6 +228,7 @@ ui listAllCliques(const Graph &graph, deviceGraphPointers &deviceGraph,
   ui *totalCliques;
   chkerr(cudaMalloc((void **)&totalCliques, sizeof(ui)));
   chkerr(cudaMemset(totalCliques, 0, sizeof(ui)));
+  cudaDeviceSynchronize();
 
   countCliques<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, totalCliques,
                                       maxBitMask, totalTasks, TOTAL_WARPS);
@@ -216,10 +238,19 @@ ui listAllCliques(const Graph &graph, deviceGraphPointers &deviceGraph,
   // Total Cliques
   ui tt;
   chkerr(cudaMemcpy(&tt, totalCliques, sizeof(ui), cudaMemcpyDeviceToHost));
+  cudaDeviceSynchronize();
+  if (tt == 0) {
+    freeLevelData(levelData);
+
+    freeDAG(deviceDAG);
+    return tt;
+  }
+
   // Stores Final k-cliques of the graph.
   memoryAllocationTrie(cliqueData, tt, k);
 
   chkerr(cudaMemset(totalCliques, 0, sizeof(ui)));
+  cudaDeviceSynchronize();
 
   size_t sharedMemoryFinal = WARPS_EACH_BLK * sizeof(ui);
 
@@ -228,6 +259,7 @@ ui listAllCliques(const Graph &graph, deviceGraphPointers &deviceGraph,
   thrust::fill(dev_ptr, dev_ptr + tt, -2);
 
   chkerr(cudaMemset(cliqueData.trie, 0, tt * k * sizeof(ui)));
+  cudaDeviceSynchronize();
 
   if (iterK == 2) {
 
@@ -690,7 +722,6 @@ int componentDecompose(deviceComponentPointers &conComp,
 
   return totalComponents;
 }
-
 void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
                       deviceFlowNetworkPointers &flowNetwork,
                       deviceComponentPointers &conComp,
@@ -823,9 +854,16 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
     cout << endl;
   }
 
-  double max_lowerBound = *thrust::max_element(
+  // Get iterator to max element
+  auto max_iter = thrust::max_element(
       thrust::device_pointer_cast(lowerBound),
       thrust::device_pointer_cast(lowerBound + totalComponents));
+
+  // Get max value by dereferencing iterator
+  double max_lowerBound = *max_iter;
+
+  // Get index by pointer arithmetic
+  int argmax = max_iter - thrust::device_pointer_cast(lowerBound);
 
   cout << " max lb " << max_lowerBound << endl;
 
@@ -845,8 +883,15 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
   chkerr(cudaMalloc((void **)&gpuSize, sizeof(ui)));
   chkerr(cudaMalloc((void **)&gpuMaxDensity, sizeof(double)));
 
-  ui cpuSize = 0;
-  double cpuMaxDensity = 0.0;
+  ui from, to;
+  chkerr(cudaMemcpy(&from, conComp.componentOffset + argmax, sizeof(ui),
+                    cudaMemcpyDeviceToHost));
+  chkerr(cudaMemcpy(&to, conComp.componentOffset + argmax + 1, sizeof(ui),
+                    cudaMemcpyDeviceToHost));
+
+  ui cpuSize = from - to;
+
+  double cpuMaxDensity = max_lowerBound;
 
   ui DSD_size = 0;
   double DSD_density = 0;
@@ -864,12 +909,15 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
     chkerr(cudaMemcpy(&lb, lowerBound + iter, sizeof(double),
                       cudaMemcpyDeviceToHost));
     if (ub > lb) {
+      cout << "ub " << ub << " lb " << lb << endl;
       ui start, end, total;
       chkerr(cudaMemcpy(&start, conComp.componentOffset + iter, sizeof(ui),
                         cudaMemcpyDeviceToHost));
       chkerr(cudaMemcpy(&end, conComp.componentOffset + iter + 1, sizeof(ui),
                         cudaMemcpyDeviceToHost));
       total = end - start;
+
+      cout << "total size " << vertexSize << " vertex " << total << endl;
 
       memoryAllocationFlowNetwork(flowNetwork, vertexSize, neighborSize);
 
@@ -956,97 +1004,9 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
       }
       double *totalExcess;
       chkerr(cudaMalloc((void **)&totalExcess, sizeof(double)));
-      chkerr(cudaMemset(totalExcess, 0, sizeof(double)));
-      preFlow<<<BLK_NUMS, BLK_DIM>>>(flowNetwork, conComp, compCounter,
-                                     totalExcess, iter);
-      cudaDeviceSynchronize();
-      CUDA_CHECK_ERROR("Preflow send");
-      if (DEBUG) {
-        ui *offset, *neighbor, *index;
-        offset = new ui[vertexSize + 1];
-        neighbor = new ui[neighborSize];
-        index = new ui[neighborSize];
 
-        double *cap, *flow;
-        cap = new double[neighborSize];
-        flow = new double[neighborSize];
-
-        ui *height;
-        double *excess;
-        height = new ui[vertexSize];
-        excess = new double[vertexSize];
-
-        cudaMemcpy(offset, flowNetwork.offset, (vertexSize + 1) * sizeof(ui),
-                   cudaMemcpyDeviceToHost);
-
-        cudaMemcpy(neighbor, flowNetwork.neighbors, (neighborSize) * sizeof(ui),
-                   cudaMemcpyDeviceToHost);
-
-        cudaMemcpy(index, flowNetwork.flowIndex, (neighborSize) * sizeof(ui),
-                   cudaMemcpyDeviceToHost);
-        cudaMemcpy(cap, flowNetwork.capacity, (neighborSize) * sizeof(double),
-                   cudaMemcpyDeviceToHost);
-        cudaMemcpy(flow, flowNetwork.flow, (neighborSize) * sizeof(double),
-                   cudaMemcpyDeviceToHost);
-
-        cudaMemcpy(height, flowNetwork.height, (vertexSize) * sizeof(ui),
-                   cudaMemcpyDeviceToHost);
-        cudaMemcpy(excess, flowNetwork.excess, (vertexSize) * sizeof(double),
-                   cudaMemcpyDeviceToHost);
-
-        cout << "offset ";
-        for (ui i = 0; i < vertexSize + 1; i++) {
-          cout << offset[i] << " ";
-        }
-        cout << endl;
-
-        cout << "Neigh ";
-        for (ui i = 0; i < neighborSize; i++) {
-          cout << neighbor[i] << " ";
-        }
-        cout << endl;
-
-        cout << "index ";
-        for (ui i = 0; i < neighborSize; i++) {
-          cout << index[i] << " ";
-        }
-        cout << endl;
-
-        cout << "cap ";
-        for (ui i = 0; i < neighborSize; i++) {
-          cout << cap[i] << " ";
-        }
-        cout << endl;
-
-        cout << "flow ";
-        for (ui i = 0; i < neighborSize; i++) {
-          cout << flow[i] << " ";
-        }
-        cout << endl;
-
-        cout << "height ";
-        for (ui i = 0; i < vertexSize; i++) {
-          cout << height[i] << " ";
-        }
-        cout << endl;
-
-        cout << "excess ";
-        for (ui i = 0; i < vertexSize; i++) {
-          cout << excess[i] << " ";
-        }
-        cout << endl;
-
-        double te;
-        cudaMemcpy(&te, totalExcess, sizeof(double), cudaMemcpyDeviceToHost);
-        cout << "TOTAL EXCESS " << te << endl;
-      }
       double hostSourceExcess, hostSinkExcess, hostTotalExcess;
-      chkerr(cudaMemcpy(&hostSourceExcess, flowNetwork.excess + vertexSize - 2,
-                        sizeof(double), cudaMemcpyDeviceToHost));
-      chkerr(cudaMemcpy(&hostSinkExcess, flowNetwork.excess + vertexSize - 1,
-                        sizeof(double), cudaMemcpyDeviceToHost));
-      chkerr(cudaMemcpy(&hostTotalExcess, totalExcess, sizeof(double),
-                        cudaMemcpyDeviceToHost));
+
       int device = -1;
       cudaGetDevice(&device);
       cudaDeviceProp deviceProp;
@@ -1064,13 +1024,109 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
                                          &changes,     &k,       &iter};
 
       void *updateFlownetworkKernelArgs[] = {
-          &flowNetwork, &conComp,         &compCounter, &upperBound,
-          &lowerBound,  &gpuConverged,    &gpuSize,     &gpuMaxDensity,
-          &k,           &newTotaLCliques, &iter};
+          &flowNetwork,   &conComp,    &finalCliqueData, &compCounter,
+          &upperBound,    &lowerBound, &gpuConverged,    &gpuSize,
+          &gpuMaxDensity, &k,          &newTotaLCliques, &iter};
 
       chkerr(cudaMemset(gpuConverged, 0, sizeof(ui)));
+      cpuConverged = 0;
       while (!cpuConverged) {
-        while ((hostSourceExcess + hostSinkExcess) < hostTotalExcess) {
+        chkerr(cudaMemset(totalExcess, 0, sizeof(double)));
+        preFlow<<<BLK_NUMS, BLK_DIM>>>(flowNetwork, conComp, compCounter,
+                                       totalExcess, iter);
+        cudaDeviceSynchronize();
+        CUDA_CHECK_ERROR("Preflow send");
+        if (DEBUG) {
+          ui *offset, *neighbor, *index;
+          offset = new ui[vertexSize + 1];
+          neighbor = new ui[neighborSize];
+          index = new ui[neighborSize];
+
+          double *cap, *flow;
+          cap = new double[neighborSize];
+          flow = new double[neighborSize];
+
+          ui *height;
+          double *excess;
+          height = new ui[vertexSize];
+          excess = new double[vertexSize];
+
+          cudaMemcpy(offset, flowNetwork.offset, (vertexSize + 1) * sizeof(ui),
+                     cudaMemcpyDeviceToHost);
+
+          cudaMemcpy(neighbor, flowNetwork.neighbors,
+                     (neighborSize) * sizeof(ui), cudaMemcpyDeviceToHost);
+
+          cudaMemcpy(index, flowNetwork.flowIndex, (neighborSize) * sizeof(ui),
+                     cudaMemcpyDeviceToHost);
+          cudaMemcpy(cap, flowNetwork.capacity, (neighborSize) * sizeof(double),
+                     cudaMemcpyDeviceToHost);
+          cudaMemcpy(flow, flowNetwork.flow, (neighborSize) * sizeof(double),
+                     cudaMemcpyDeviceToHost);
+
+          cudaMemcpy(height, flowNetwork.height, (vertexSize) * sizeof(ui),
+                     cudaMemcpyDeviceToHost);
+          cudaMemcpy(excess, flowNetwork.excess, (vertexSize) * sizeof(double),
+                     cudaMemcpyDeviceToHost);
+
+          cout << "offset ";
+          for (ui i = 0; i < vertexSize + 1; i++) {
+            cout << offset[i] << " ";
+          }
+          cout << endl;
+
+          cout << "Neigh ";
+          for (ui i = 0; i < neighborSize; i++) {
+            cout << neighbor[i] << " ";
+          }
+          cout << endl;
+
+          cout << "index ";
+          for (ui i = 0; i < neighborSize; i++) {
+            cout << index[i] << " ";
+          }
+          cout << endl;
+
+          cout << "cap ";
+          for (ui i = 0; i < neighborSize; i++) {
+            cout << cap[i] << " ";
+          }
+          cout << endl;
+
+          cout << "flow ";
+          for (ui i = 0; i < neighborSize; i++) {
+            cout << flow[i] << " ";
+          }
+          cout << endl;
+
+          cout << "height ";
+          for (ui i = 0; i < vertexSize; i++) {
+            cout << height[i] << " ";
+          }
+          cout << endl;
+
+          cout << "excess ";
+          for (ui i = 0; i < vertexSize; i++) {
+            cout << excess[i] << " ";
+          }
+          cout << endl;
+
+          double te;
+          cudaMemcpy(&te, totalExcess, sizeof(double), cudaMemcpyDeviceToHost);
+          cout << "TOTAL EXCESS " << te << endl;
+        }
+
+        chkerr(cudaMemcpy(&hostSourceExcess,
+                          flowNetwork.excess + vertexSize - 2, sizeof(double),
+                          cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(&hostSinkExcess, flowNetwork.excess + vertexSize - 1,
+                          sizeof(double), cudaMemcpyDeviceToHost));
+        chkerr(cudaMemcpy(&hostTotalExcess, totalExcess, sizeof(double),
+                          cudaMemcpyDeviceToHost));
+        double epsilon = 1e-2; // Tolerance = 0.01
+        while (abs((hostSourceExcess + hostSinkExcess) - hostTotalExcess) >
+               epsilon) {
+
           cudaLaunchCooperativeKernel((void *)pushRelabel, num_blocks,
                                       block_size, pushRelabelKernelArgs,
                                       sharedMemSize, 0);
@@ -1163,6 +1219,7 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
                                       nullptr);
           cudaDeviceSynchronize();
           CUDA_CHECK_ERROR("Global Relabel");
+
           chkerr(cudaMemcpy(&hostSourceExcess,
                             flowNetwork.excess + vertexSize - 2, sizeof(double),
                             cudaMemcpyDeviceToHost));
@@ -1171,6 +1228,8 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
                             cudaMemcpyDeviceToHost));
           chkerr(cudaMemcpy(&hostTotalExcess, totalExcess, sizeof(double),
                             cudaMemcpyDeviceToHost));
+
+          // break;
         }
         chkerr(cudaMemset(gpuMaxDensity, 0, sizeof(double)));
         chkerr(cudaMemset(gpuSize, 0, sizeof(ui)));
@@ -1180,14 +1239,19 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
                                     nullptr);
         cudaDeviceSynchronize();
         CUDA_CHECK_ERROR("Update  flow Network");
+        chkerr(cudaMemcpy(flowNetwork.flow, flowNetwork.capacity,
+                          (neighborSize) * sizeof(double),
+                          cudaMemcpyDeviceToDevice));
+
         chkerr(cudaMemcpy(&cpuConverged, gpuConverged, sizeof(ui),
                           cudaMemcpyDeviceToHost));
         chkerr(
             cudaMemcpy(&cpuSize, gpuSize, sizeof(ui), cudaMemcpyDeviceToHost));
         chkerr(cudaMemcpy(&cpuMaxDensity, gpuMaxDensity, sizeof(double),
                           cudaMemcpyDeviceToHost));
+        // cout<<" CPU MAX DENSITY"<<cpuMaxDensity<<endl;
 
-        if (cpuMaxDensity > DSD_density) {
+        if (cpuMaxDensity >= DSD_density) {
           DSD_density = cpuMaxDensity;
           DSD_size = cpuSize;
         }
@@ -1198,6 +1262,7 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
     freeFlownetwork(flowNetwork);
     iter++;
   }
+  cout << "Max Density " << DSD_density << " Size " << DSD_size << endl;
 }
 
 int main(int argc, const char *argv[]) {
@@ -1205,6 +1270,8 @@ int main(int argc, const char *argv[]) {
     cout << "Server wrong input parameters!" << endl;
     exit(1);
   }
+
+  cout << "TOTAL WARPS" << TOTAL_WARPS << endl;
 
   string filepath =
       argv[1]; //  Path to the graph file. The graph should be represented as
@@ -1313,17 +1380,10 @@ int main(int argc, const char *argv[]) {
         pSize, totalCliques, TOTAL_WARPS);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Write Edge Clique");
-
     ui *cc;
     cc = new ui[graph.kmax + 1];
     chkerr(cudaMemcpy(cc, cliqueCount, (graph.kmax + 1) * sizeof(ui),
                       cudaMemcpyDeviceToHost));
-
-    cout << "clique Count " << endl;
-    for (ui i = 0; i < (graph.kmax + 1); i++) {
-      cout << cc[i] << " ";
-    }
-    cout << endl;
 
     coreTotalCliques = totalCliques;
     maxCore = 0;
@@ -1334,7 +1394,7 @@ int main(int argc, const char *argv[]) {
     thrust::device_ptr<int> dev_ptr(deviceGraph.cliqueCore);
 
     // Lambda captures 'i' (must be marked __host__ __device__)
-    cout << "max " << maxCore << " total C " << coreTotalCliques << endl;
+    cout << "max " << maxCore << " total Cliques " << coreTotalCliques << endl;
 
     double currentMax;
 
@@ -1342,8 +1402,9 @@ int main(int argc, const char *argv[]) {
       auto predicate = [i] __host__ __device__(int x) { return x >= i; };
 
       ui count = thrust::count_if(dev_ptr, dev_ptr + graph.n, predicate);
-      cout << "Count " << count << endl;
+      // cout << "Count " << count << endl;
       coreSize.push_back(count);
+
       coreTotalCliques = coreTotalCliques - cc[i - 1];
       currentMax = static_cast<double>(coreTotalCliques) / count;
       // coreSize.push_back(count);
@@ -1352,8 +1413,9 @@ int main(int argc, const char *argv[]) {
         maxCore = i;
       }
     }
-    cout << "max " << maxCore << " total C " << coreTotalCliques << " count "
-         << coreSize[maxCore] << " Max density " << maxDensity << endl;
+    cout << "max " << maxCore << " total Cliques " << coreTotalCliques
+         << " count " << coreSize[maxCore] << " Max density " << maxDensity
+         << endl;
 
   } else {
     totalCliques = listAllCliques(graph, deviceGraph, deviceDAG, levelData, k,
@@ -1361,6 +1423,14 @@ int main(int argc, const char *argv[]) {
     cliqueCoreDecompose(graph, deviceGraph, cliqueData, maxCore, maxDensity,
                         coreSize, coreTotalCliques, glBufferSize, k,
                         totalCliques);
+  }
+  if (totalCliques == 0) {
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> duration_ms = end - start;
+    freeGraph(deviceGraph);
+    cout << "Max Density " << 0 << " Size " << 0 << endl;
+    std::cout << "Time taken: " << duration_ms.count() << " ms" << std::endl;
+    return 0;
   }
 
   if (DEBUG) {
@@ -1402,6 +1472,8 @@ int main(int argc, const char *argv[]) {
   ui k_prime = std::ceil(maxDensity);
 
   cout << "k prime " << k_prime << endl;
+
+  cout << "core ar size " << coreSize.size() << endl;
 
   ui coresize = coreSize[k_prime];
 
