@@ -22,9 +22,8 @@ __global__ void flushParitions(deviceDAGpointer D,
                                ui totalWarps);
 __global__ void listMidCliques(deviceDAGpointer D,
                                cliqueLevelDataPointer levelData, ui *label,
-                               ui k, ui iterK, ui n, ui m, ui pSize, ui cpSize,
-                               ui maxBitMask, ui totalTasks, ui level,
-                               ui totalWarps);
+                               ui k, ui n, ui pSize, ui cpSize, ui maxBitMask,
+                               ui totalTasks, ui level, ui totalWarps);
 __global__ void writeFinalCliques(deviceGraphPointers G, deviceDAGpointer D,
                                   cliqueLevelDataPointer levelData,
                                   deviceCliquesPointer cliqueData,

@@ -8,7 +8,6 @@
 #include <sstream>
 #include <vector>
 
-
 class Graph {
 public:
   ui n;
