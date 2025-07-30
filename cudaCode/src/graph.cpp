@@ -36,7 +36,7 @@ Graph::Graph(std::string path) {
   }
 
   inputFile.close();
-  std::cout << "n =" << n << ", m=" << m << std::endl;
+  std::cout << "n=" << n << ", m=" << m << std::endl;
 }
 void Graph::getListingOrder(std::vector<ui> &arr) {
   /* Rettrun an array with each index storing the listing order based on the
@@ -56,7 +56,7 @@ void Graph::coreDecompose(std::vector<ui> &arr) {
      values. */
   core.resize(n);
   int maxDegree = *std::max_element(degree.begin(), degree.end());
-  std::cout << "maxDegree = " << maxDegree << std::endl;
+  std::cout << "Max Degree=" << maxDegree << std::endl;
 
   // Initialize bins
   std::vector<ui> bins(maxDegree + 1, 0);

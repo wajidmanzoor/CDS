@@ -34,7 +34,7 @@ scan_active_vertices(int totalFlow, ui source, ui sink,
 
   /* Stride scan the V set */
   for (int u = idx; u < totalFlow; u += blockDim.x * gridDim.x) {
-    if (flowNetwork.excess[u] > 0 && flowNetwork.height[u] < totalFlow &&
+    if (flowNetwork.excess[u] > 1e-6 && flowNetwork.height[u] < totalFlow &&
         u != source && u != sink) {
       activeNodes[atomicAdd(&globalCounter, 1)] = u;
     }
@@ -66,7 +66,7 @@ tiled_search_neighbor(cg::thread_block_tile<tileSize> tile, int pos,
     if (i * tileSize + idx < degree) {
       v_pos = flowNetwork.offset[u] + i * tileSize + idx;
       v = flowNetwork.neighbors[v_pos];
-      if ((flowNetwork.flow[v_pos] > 0) && (v != source)) {
+      if ((flowNetwork.flow[v_pos] > 1e-6) && (v != source)) {
         sheight[threadIdx.x] = flowNetwork.height[v];
         svid[threadIdx.x] = v;
         svidx[threadIdx.x] = v_pos;
@@ -192,7 +192,15 @@ __global__ void listIntialCliques(deviceDAGpointer D,
   size_t oM = oCP * (size_t)maxBitMask;
 
   // Calculate word-based offset for 32-bit atomic operations
-  size_t labelWordOffset = ((size_t)warpId * (size_t)n + 31) / 32;
+  ui oneLabelSize = (n + 31) / 32;
+  size_t labelWordOffset = (size_t)warpId * (size_t)oneLabelSize;
+
+  /*if (laneId == 0) {
+    printf("warp id %d pc %llu can %llu off %llu mask %llu label %llu \n",
+           warpId, (unsigned long long)oP, (unsigned long long)oCP,
+           (unsigned long long)oO, (unsigned long long)oM,
+           (unsigned long long)labelWordOffset);
+  }*/
 
   // Create pointers to warp-specific partitions
   ui *warpPartialCliques = levelData.partialCliquesPartition + oP;
@@ -204,6 +212,9 @@ __global__ void listIntialCliques(deviceDAGpointer D,
 
   for (ui i = warpId; i < n; i += totalWarps) {
     ui vertex = i, vOff = D.offset[vertex];
+    /*if (laneId == 0)
+      printf(" warp id %d i %d v %d vertex offset %d \n", warpId, i, vertex,
+             vOff);*/
 
     if (laneId == 0)
       counter[threadIdx.x / warpSize] = 0;
@@ -214,16 +225,24 @@ __global__ void listIntialCliques(deviceDAGpointer D,
 
     for (ui j = laneId; j < D.degree[vertex]; j += warpSize) {
       ui neigh = D.neighbors[vOff + j];
+      /*printf(" warp id %d i %d v %d j %d neigh %d deg %d vertex offset %d \n",
+             warpId, i, vertex, j, neigh, D.degree[vertex], vOff);*/
       // 32-bit atomic bit manipulation
       ui wordIdx = neigh / 32; // Which ui word (0, 1, 2, ...)
       ui bitPos = neigh % 32;  // Which bit in that word (0-31)
       ui mask = 1U << bitPos;
 
       ui old = atomicOr(&warpLabel[wordIdx], mask);
+      /*printf(" warp id %d i %d v %d j %d neigh %d deg %d vertex offset %d "
+             "wordIdx %d bitPos %d old %d  \n",
+             warpId, i, vertex, j, neigh, D.degree[vertex], vOff, wordIdx,
+             bitPos, old);*/
       if (!(old & mask)) {
         ui loc = atomicAdd(&counter[threadIdx.x / warpSize], 1);
 
         warpCandidates[cOff + loc] = neigh;
+        /*printf(" warp id %d i %d v %d vertex offset %d candidate off %d loc %d
+           " "candidate %d \n", warpId, i, vertex, vOff, cOff, loc, neigh);*/
       }
     }
 
@@ -235,6 +254,12 @@ __global__ void listIntialCliques(deviceDAGpointer D,
       *warpCount += 1;
       warpOffsetPartition[*warpCount] =
           warpOffsetPartition[*warpCount - 1] + counter[threadIdx.x / warpSize];
+      /*printf(
+          " warp id %d i %d v %d pc location %zu pc %d count %d candidate "
+          "off location %d candidate offset from  %d candidate offset to %d\n",
+          warpId, i, vertex, w, warpPartialCliques[w], *warpCount, *warpCount,
+          warpOffsetPartition[*warpCount], warpOffsetPartition[*warpCount -
+         1]);*/
     }
 
     __syncwarp();
@@ -263,6 +288,8 @@ __global__ void listIntialCliques(deviceDAGpointer D,
                              (size_t)maxBitMask +
                          m;
         warpValidNeighMask[maskIdx] = bitmask;
+        /*printf(" warp id %d i %d v %d valid location %zu mask %d cand %d \n",
+               warpId, i, vertex, maskIdx, bitmask, cand);*/
       }
     }
 
@@ -362,7 +389,10 @@ __global__ void listMidCliques(deviceDAGpointer D,
   size_t oM = (size_t)warpId * (size_t)cpSize * (size_t)maxBitMask;
 
   // Calculate word-based offset for 32-bit atomic operations
-  size_t labelWordOffset = ((size_t)warpId * (size_t)n + 31) / 32;
+  // size_t labelWordOffset = ((size_t)warpId * (size_t)n + 31) / 32;
+
+  ui oneLabelSize = (n + 31) / 32;
+  size_t labelWordOffset = (size_t)warpId * (size_t)oneLabelSize;
 
   // Create pointers to warp-specific partitions
   ui *warpPartialCliques = levelData.partialCliquesPartition + oP;
@@ -1255,8 +1285,8 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork,
       // clique to vertex backward -- (2)
       ui foffset1 = flowNetwork.offset[total + i];
       flowNetwork.neighbors[foffset1 + j] = u;
-      flowNetwork.capacity[foffset1 + j] = k - 1;
-      flowNetwork.flow[foffset1 + j] = k - 1;
+      flowNetwork.capacity[foffset1 + j] = DINF;
+      flowNetwork.flow[foffset1 + j] = DINF;
       // index to foward
       flowNetwork.flowIndex[foffset1 + j] = foffset + loc + 1;
     }
@@ -1275,7 +1305,8 @@ __global__ void preFlow(deviceFlowNetworkPointers flowNetwork,
 
   ui source = total + totalCliques;
   for (ui i = idx; i < (total + totalCliques + 2); i += TOTAL_THREAD) {
-    flowNetwork.height[i] = (i == source) ? (total + totalCliques + 2) : 0;
+    flowNetwork.height[i] =
+        (i == source) ? (total + totalCliques + 2) : (i < total ? 1 : 0);
     flowNetwork.excess[i] = 0;
   }
 
@@ -1289,13 +1320,30 @@ __global__ void preFlow(deviceFlowNetworkPointers flowNetwork,
       flowNetwork.flow[backIndex] = flowNetwork.capacity[nStart + i];
       flowNetwork.excess[neigh] += flowNetwork.capacity[nStart + i];
       atomicAdd(totalExcess, flowNetwork.capacity[nStart + i]);
+      /*printf("idx %d v %d forward %d backIndex%d \n", i, neigh, nStart + i,
+             backIndex);*/
+      if (flowNetwork.excess[neigh] > 1e-6) {
+        ui sinkoffset = flowNetwork.offset[i];
+        if (flowNetwork.capacity[sinkoffset] > 1e-6) {
+          double flow =
+              min(flowNetwork.excess[neigh], flowNetwork.flow[sinkoffset]);
+          flowNetwork.flow[sinkoffset] -= flow;
+          ui backIndex1 = flowNetwork.flowIndex[sinkoffset];
+          flowNetwork.flow[backIndex1] += flow;
+          flowNetwork.excess[neigh] -= flow;
+          atomicAdd(&flowNetwork.excess[total + totalCliques + 1], flow);
+          /*printf("idx %d v %d source %d forward %d backIndex%d \n", i, neigh,
+                 sinkoffset, sinkoffset, backIndex1);*/
+        }
+      }
     }
   }
 }
 
 __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
                             deviceComponentPointers conComp, ui *compCounter,
-                            double *totalExcess, ui *activeNodes, ui iter) {
+                            double *totalExcess, ui *activeNodes, ui iter,
+                            ui *solved) {
 
   grid_group grid = this_grid();
   cg::thread_block block = cg::this_thread_block();
@@ -1368,6 +1416,13 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
     grid.sync();
     cycle = cycle - 1;
   }
+  if (threadIdx.x == 0 &&
+      blockIdx.x == 0) { // Only the first thread in the first block
+    // printf("final counter %d \n", globalCounter);
+    if (globalCounter == 0) {
+      *solved = 1;
+    }
+  }
 }
 
 __global__ void globalRelabel(deviceFlowNetworkPointers flowNetwork,
@@ -1383,41 +1438,18 @@ __global__ void globalRelabel(deviceFlowNetworkPointers flowNetwork,
 
   for (ui i = idx; i < total; i += TOTAL_THREAD) {
     ui vertexOffset = flowNetwork.offset[i];
-    if (flowNetwork.flow[vertexOffset] > 1e-8) {
+    // printf("idx %d v %d offset %d\n", idx, i, vertexOffset);
+    if (flowNetwork.flow[vertexOffset] > 1e-6) {
       flowNetwork.height[i] = 1;
     }
   }
 
   grid.sync();
-
-  for (ui i = idx; i < totalCliques; i += TOTAL_THREAD) {
-    ui cliqueOffset = flowNetwork.offset[total + i];
-    // ui v = flowNetwork.neighbors[cliqueOffset];
-    for (ui j = 0; j < k; j++) {
-      if (flowNetwork.flow[cliqueOffset + j] > 1e-8) {
-        if (flowNetwork.height[flowNetwork.neighbors[cliqueOffset + j]] == 1) {
-          flowNetwork.height[total + i] = 2;
-          break;
-        }
-      }
-    }
-  }
-  grid.sync();
-  for (ui i = idx; i < total; i += TOTAL_THREAD) {
-    ui sourceOffset = flowNetwork.offset[total + totalCliques];
-    if (flowNetwork.flow[sourceOffset + i] > 1e-8) {
-      ui v = flowNetwork.neighbors[sourceOffset + i];
-      if (flowNetwork.height[v] == 1) {
-        atomicCAS(changes, 0, 1);
-      }
-    }
-  }
-  grid.sync();
   if (idx == 0) {
-    flowNetwork.height[total + totalCliques - 1] = 0;
-    if (*changes == 1) {
-      flowNetwork.height[total + totalCliques] = 2;
-    }
+    flowNetwork.height[total + totalCliques + 1] = 0;
+    // printf("sink loc %d \n", total + totalCliques + 1);
+
+    // printf("source loc %d \n", total + totalCliques);
   }
 }
 
@@ -1425,8 +1457,7 @@ __global__ void updateFlownetwork(deviceFlowNetworkPointers flowNetwork,
                                   deviceComponentPointers conComp,
                                   deviceCliquesPointer finalCliqueData,
                                   ui *compCounter, double *upperBound,
-                                  double *lowerBound, ui *gpuConverged,
-                                  ui *gpuSize, double *gpuMaxDensity, ui k,
+                                  double *lowerBound, ui *gpuConverged, ui k,
                                   ui t, ui iter) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   grid_group grid = this_grid();
@@ -1434,63 +1465,23 @@ __global__ void updateFlownetwork(deviceFlowNetworkPointers flowNetwork,
   ui start = conComp.componentOffset[iter];
   ui end = conComp.componentOffset[iter + 1];
   ui total = end - start;
-  ui cliqueStart = compCounter[iter];
+  // ui cliqueStart = compCounter[iter];
   ui totalCliques = compCounter[iter + 1] - compCounter[iter];
   ui tFlow = total + totalCliques + 2;
 
   double bais = 1.0 / (total * (total - 1));
+  bais = max(0.1, bais);
   double temp = static_cast<double>(totalCliques) * k;
-
-  if (fabs(flowNetwork.excess[tFlow - 1] - temp) > 1e-8) {
-    ui sourceOffset = flowNetwork.offset[total + totalCliques];
-    for (ui i = idx; i < total; i += TOTAL_THREAD) {
-      if (flowNetwork.flow[sourceOffset + i] > 1e-8) {
-        atomicAdd(gpuSize, 1);
-      }
-    }
-
-    grid.sync();
-
-    for (ui i = idx; i < totalCliques; i += TOTAL_THREAD) {
-      ui j = 0;
-      ui found = true;
-      while (j < k) {
-        ui vertex =
-            conComp
-                .reverseMapping[finalCliqueData.trie[j * t + i + cliqueStart]] -
-            start;
-
-        if (flowNetwork.flow[sourceOffset + vertex] <= 1e-8) {
-          found = false;
-          break;
-        }
-        j++;
-      }
-
-      if (found) {
-        atomicAdd(gpuMaxDensity, 1);
-      }
-    }
-    grid.sync();
-    if (idx == 0) {
-      *gpuMaxDensity = *gpuMaxDensity / (*gpuSize);
-    }
-  } else {
-    if (idx == 0) {
-      *gpuMaxDensity = lowerBound[iter];
-      // printf("max density %f iter %u lb %f \n",
-      // *gpuMaxDensity,iter,lowerBound[iter]);
-      *gpuSize = total;
-    }
-  }
-  grid.sync();
   double alpha = (upperBound[iter] + lowerBound[iter]) / 2;
 
   if (idx == 0) {
-    if (fabs(flowNetwork.excess[tFlow - 1] - temp) < 1e-8) {
+    if (fabs(flowNetwork.excess[tFlow - 1] - temp) < 1e-1) {
       upperBound[iter] = alpha;
+      // printf("\n uper Bound Changes \n");
+
     } else {
       lowerBound[iter] = alpha;
+      // printf("\n lower Bound Changes \n");
     }
 
     if ((upperBound[iter] - lowerBound[iter]) < bais) {
@@ -1499,10 +1490,11 @@ __global__ void updateFlownetwork(deviceFlowNetworkPointers flowNetwork,
   }
   grid.sync();
 
-  if (!*gpuConverged) {
+  if (!(*gpuConverged)) {
+    alpha = (upperBound[iter] + lowerBound[iter]) / 2;
 
     for (ui i = idx; i < total; i += TOTAL_THREAD) {
-      ui vertexOffset = flowNetwork.neighbors[i];
+      ui vertexOffset = flowNetwork.offset[i];
       flowNetwork.capacity[vertexOffset] = alpha * k;
     }
   }

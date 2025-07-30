@@ -116,10 +116,10 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork,
 __global__ void preFlow(deviceFlowNetworkPointers flowNetwork,
                         deviceComponentPointers conComp, ui *compCounter,
                         double *totalExcess, ui iter);
-
 __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
                             deviceComponentPointers conComp, ui *compCounter,
-                            double *totalExcess, ui *activeNodes, ui iter);
+                            double *totalExcess, ui *activeNodes, ui iter,
+                            ui *solved);
 __global__ void globalRelabel(deviceFlowNetworkPointers flowNetwork,
                               deviceComponentPointers conComp, ui *compCounter,
                               ui *changes, ui k, ui iter);
@@ -127,6 +127,5 @@ __global__ void updateFlownetwork(deviceFlowNetworkPointers flowNetwork,
                                   deviceComponentPointers conComp,
                                   deviceCliquesPointer finalCliqueData,
                                   ui *compCounter, double *upperBound,
-                                  double *lowerBound, ui *gpuConverged,
-                                  ui *gpuSize, double *gpuMaxDensity, ui k,
+                                  double *lowerBound, ui *gpuConverged, ui k,
                                   ui t, ui iter);
