@@ -729,7 +729,7 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
                       deviceCliquesPointer &cliqueData,
                       deviceCliquesPointer &finalCliqueData, ui vertexCount,
                       ui totalComponents, ui totalCliques, ui k, ui maxCore,
-                      ui partitionSize) {
+                      ui partitionSize, int earlyStop) {
 
   // Reverse mapping
   thrust::device_ptr<unsigned int> d_vertex_map_ptr(conComp.mapping);
@@ -828,7 +828,7 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
 
   getLbUbandSize<<<BLK_NUMS, BLK_DIM>>>(
       conComp, compCounter, lowerBound, upperBound, flownetworkSize,
-      flownetworkNeighSize, totalComponents, k, maxDensity1);
+      flownetworkNeighSize, totalComponents, k, maxDensity1, use_ub1, use_ub2);
   cudaDeviceSynchronize();
   CUDA_CHECK_ERROR("Get UB LU and Size");
 
@@ -866,18 +866,18 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
   // Get index by pointer arithmetic
   int argmax = max_iter - thrust::device_pointer_cast(lowerBound);
 
-  cout << " max lb " << max_lowerBound << endl;
+  // cout << " max lb " << max_lowerBound << endl;
 
   thrust::fill(thrust::device_pointer_cast(lowerBound),
                thrust::device_pointer_cast(lowerBound + totalComponents),
                max_lowerBound);
 
   int iter = 0;
-  ui *gpuConverged;
+  ui *gpuConverged, *capLeft;
   chkerr(cudaMalloc((void **)&gpuConverged, sizeof(ui)));
+  chkerr(cudaMalloc((void **)&capLeft, sizeof(ui)));
+
   ui cpuConverged = 0;
-  ui *changes;
-  chkerr(cudaMalloc((void **)&changes, sizeof(ui)));
 
   ui from, to;
   chkerr(cudaMemcpy(&from, conComp.componentOffset + argmax, sizeof(ui),
@@ -889,9 +889,11 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
 
   double DSD_density = static_cast<double>(max_lowerBound);
 
-  cout << " start Density " << DSD_density << endl;
+  // cout << " start Density " << DSD_density << endl;
+  ui cpuCapLeft;
 
   while (iter < totalComponents) {
+
     ui vertexSize, neighborSize;
     chkerr(cudaMemcpy(&vertexSize, flownetworkSize + iter, sizeof(ui),
                       cudaMemcpyDeviceToHost));
@@ -903,6 +905,8 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
                       cudaMemcpyDeviceToHost));
     chkerr(cudaMemcpy(&lb, lowerBound + iter, sizeof(double),
                       cudaMemcpyDeviceToHost));
+
+    // cout << "lb " << lb << " ub " << ub << endl;
     if (ub > lb) {
       ui start, end, total;
       chkerr(cudaMemcpy(&start, conComp.componentOffset + iter, sizeof(ui),
@@ -910,6 +914,7 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
       chkerr(cudaMemcpy(&end, conComp.componentOffset + iter + 1, sizeof(ui),
                         cudaMemcpyDeviceToHost));
       total = end - start;
+      // cout << "Component Size " << total << endl;
       memoryAllocationFlowNetwork(flowNetwork, vertexSize, neighborSize);
 
       thrust::fill(thrust::device_pointer_cast(flowNetwork.offset + 1),
@@ -1017,7 +1022,7 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
                                        &solved};
 
       void *globalRelabelKernelArgs[] = {&flowNetwork, &conComp, &compCounter,
-                                         &changes,     &k,       &iter};
+                                         &k,           &iter,    &capLeft};
 
       void *updateFlownetworkKernelArgs[] = {
           &flowNetwork,     &conComp,    &finalCliqueData, &compCounter,
@@ -1026,7 +1031,10 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
 
       chkerr(cudaMemset(gpuConverged, 0, sizeof(ui)));
       cpuConverged = 0;
+      // ui boro = 0;
       while (!cpuConverged) {
+        // cout << "Level " << boro << endl;
+        // boro++;
         chkerr(cudaMemcpy(&ub, upperBound + iter, sizeof(double),
                           cudaMemcpyDeviceToHost));
         chkerr(cudaMemcpy(&lb, lowerBound + iter, sizeof(double),
@@ -1126,9 +1134,28 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
         chkerr(cudaMemcpy(&hostTotalExcess, totalExcess, sizeof(double),
                           cudaMemcpyDeviceToHost));
         double epsilon = 1e-2; // Tolerance = 0.01
+        int sameValueNum = 0;
+        double lastSinkExcess = 0;
+
         while (abs((hostSourceExcess + hostSinkExcess) - hostTotalExcess) >
                epsilon) {
+          if (earlyStop > -1) {
+            /*cout << "last " << lastSinkExcess << " curr " << hostSinkExcess
+                 << " num " << sameValueNum << endl;*/
+            if (abs(lastSinkExcess - hostSinkExcess) < epsilon) {
+              sameValueNum++;
+            } else {
+              lastSinkExcess = hostSinkExcess;
+              sameValueNum = 0;
+            }
+            if (sameValueNum == earlyStop) {
+              break;
+            }
+          }
 
+          /*cout << "Total Excess " << hostTotalExcess << " sink excess "
+               << hostSinkExcess << endl;*/
+          // cout << "------------------------------------------" << endl;
           chkerr(cudaMemset(solved, 0, sizeof(ui)));
 
           cudaLaunchCooperativeKernel((void *)pushRelabel, num_blocks,
@@ -1233,12 +1260,20 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
           if (cpuSolved) {
             break;
           }
-          chkerr(cudaMemset(changes, 0, sizeof(ui)));
+          cpuCapLeft = 1;
+          chkerr(cudaMemcpy(capLeft, &cpuCapLeft, sizeof(ui),
+                            cudaMemcpyHostToDevice));
           cudaLaunchCooperativeKernel((void *)globalRelabel, num_blocks,
                                       block_size, globalRelabelKernelArgs, 0,
                                       nullptr);
           cudaDeviceSynchronize();
           CUDA_CHECK_ERROR("Global Relabel");
+
+          chkerr(cudaMemcpy(&cpuCapLeft, capLeft, sizeof(ui),
+                            cudaMemcpyDeviceToHost));
+          if (cpuCapLeft) {
+            break;
+          }
 
           if (DEBUG) {
             cout << endl << " After Global Relabel " << endl;
@@ -1434,7 +1469,7 @@ void dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
 }
 
 int main(int argc, const char *argv[]) {
-  if (argc != 7) {
+  if (argc != 11) {
     cout << "Server wrong input parameters!" << endl;
     exit(1);
   }
@@ -1454,6 +1489,12 @@ int main(int argc, const char *argv[]) {
   ui partitionSize = atoi(argv[6]); // Virtual Partition to store the active
                                     // node of each flownetwork
   // ui t = atoi(argv[8]);             // Total Number of cliques.
+
+  int earlyStop = atoi(argv[7]);
+
+  use_ub1 = atoi(argv[8]);
+  use_ub2 = atoi(argv[9]);
+  use_ub3 = atoi(argv[10]);
 
   if (DEBUG) {
     cout << "filepath: " << filepath << endl;
@@ -1507,21 +1548,26 @@ int main(int argc, const char *argv[]) {
     cout << endl;
   }
 
-  auto start = std::chrono::high_resolution_clock::now();
-
   // Structure to store the graph on device
   memoryAllocationGraph(deviceGraph, graph);
 
   // Generates the DAG based on the listing order.
   // Only includes edges from a vertex with a lower listing order to one with
   // a higher listing order.
+  auto start = std::chrono::high_resolution_clock::now();
   generateDAG(graph, deviceGraph, deviceDAG, listingOrder);
+  auto dagEnd = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> dag_ms = dagEnd - start;
 
   ui totalCliques;
   ui coreTotalCliques, maxCore;
   double maxDensity;
 
   std::vector<ui> coreSize;
+  std::chrono::high_resolution_clock::time_point coreDecomEnd;
+  std::chrono::high_resolution_clock::time_point cliqueListEnd;
+  std::chrono::duration<double, std::milli> cliqueList_ms;
+  std::chrono::duration<double, std::milli> coreDecom_ms;
 
   if (k == 2) {
     chkerr(cudaMemcpy(&totalCliques, deviceDAG.offset + graph.n, sizeof(ui),
@@ -1529,8 +1575,6 @@ int main(int argc, const char *argv[]) {
     // totalCliques = deviceDAG.offset[graph.n + 1];
 
     memoryAllocationTrie(cliqueData, totalCliques, k);
-
-    cout << "Total cliques " << totalCliques << endl;
 
     chkerr(cudaMemcpy(deviceGraph.cliqueCore, graph.core.data(),
                       graph.n * sizeof(int), cudaMemcpyHostToDevice));
@@ -1545,6 +1589,9 @@ int main(int argc, const char *argv[]) {
         pSize, totalCliques, TOTAL_WARPS);
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Write Edge Clique");
+    cliqueListEnd = std::chrono::high_resolution_clock::now();
+    cliqueList_ms = cliqueListEnd - dagEnd;
+
     ui *cc;
     cc = new ui[graph.kmax + 1];
     chkerr(cudaMemcpy(cc, cliqueCount, (graph.kmax + 1) * sizeof(ui),
@@ -1578,15 +1625,21 @@ int main(int argc, const char *argv[]) {
         }
       }
     }
+    coreDecomEnd = std::chrono::high_resolution_clock::now();
+    coreDecom_ms = coreDecomEnd - cliqueListEnd;
 
   } else {
     totalCliques = listAllCliques(graph, deviceGraph, deviceDAG, levelData, k,
                                   pSize, cpSize);
+    cliqueListEnd = std::chrono::high_resolution_clock::now();
+    cliqueList_ms = cliqueListEnd - dagEnd;
+
     cliqueCoreDecompose(graph, deviceGraph, cliqueData, maxCore, maxDensity,
                         coreSize, coreTotalCliques, glBufferSize, k,
                         totalCliques);
+    coreDecomEnd = std::chrono::high_resolution_clock::now();
+    coreDecom_ms = coreDecomEnd - cliqueListEnd;
   }
-  cout << "Total Cliques=" << totalCliques << endl;
   if (totalCliques == 0) {
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration_ms = end - start;
@@ -1628,13 +1681,15 @@ int main(int argc, const char *argv[]) {
     }
     cout << endl;
   }
-  cout << "Densest Core Density=" << maxDensity << endl;
   ui k_prime = std::ceil(maxDensity);
 
   ui coresize = coreSize[k_prime];
 
   ui edgecount = generateDensestCore(graph, deviceGraph, densestCore, coresize,
                                      coreTotalCliques, k_prime);
+  auto denCoreEnd = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> denCore_ms =
+      denCoreEnd - coreDecomEnd;
 
   ui vertexCount;
   chkerr(cudaMemcpy(&vertexCount, densestCore.n, sizeof(ui),
@@ -1646,6 +1701,10 @@ int main(int argc, const char *argv[]) {
   // Prune invalid edges i.e. edges that are not part of any clique.
   ui newEdgeCount = prune(densestCore, cliqueData, prunedNeighbors, vertexCount,
                           edgecount, k, totalCliques, k_prime);
+
+  auto pruneEnd = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> prune_ms = pruneEnd - denCoreEnd;
+
   /*if (k == 2) {
     chkerr(cudaMemcpy(prunedNeighbors.newOffset, densestCore.offset,
                       vertexCount * sizeof(ui), cudaMemcpyDeviceToDevice));
@@ -1669,19 +1728,42 @@ int main(int argc, const char *argv[]) {
   ui totalComponents =
       componentDecompose(conComp, prunedNeighbors, vertexCount, newEdgeCount);
 
-  cout << "Total Components=" << totalComponents << endl;
+  auto compDecomEnd = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> compDecom_ms =
+      compDecomEnd - pruneEnd;
 
   // Dynamic exact
 
   dynamicExactAlgo(graph, deviceGraph, flowNetwork, conComp, cliqueData,
                    finalCliqueData, vertexCount, totalComponents, totalCliques,
-                   k, k_prime, partitionSize);
+                   k, k_prime, partitionSize, earlyStop);
+
+  auto exactEnd = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> exact_ms = exactEnd - compDecomEnd;
 
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double, std::milli> duration_ms = end - start;
+
   freeComponents(conComp);
   freeGraph(deviceGraph);
   freeTrie(finalCliqueData);
+  cout << "Total Cliques=" << totalCliques << endl;
+
+  cout << "Densest Core Density=" << maxDensity << endl;
+
+  cout << "Total Components=" << totalComponents << endl;
+
+  std::cout << "DAG Time =" << dag_ms.count() << " ms" << std::endl;
+  std::cout << "Clique Listing Time =" << cliqueList_ms.count() << " ms"
+            << std::endl;
+  std::cout << "Core Decompose Time =" << coreDecom_ms.count() << " ms"
+            << std::endl;
+  std::cout << "Densest Core Time =" << denCore_ms.count() << " ms"
+            << std::endl;
+  std::cout << "Prune Time =" << prune_ms.count() << " ms" << std::endl;
+  std::cout << "Connected Component Time =" << compDecom_ms.count() << " ms"
+            << std::endl;
+  std::cout << "Exact Time =" << exact_ms.count() << " ms" << std::endl;
   std::cout << "Time taken=" << duration_ms.count() << " ms" << std::endl;
 
   return 0;

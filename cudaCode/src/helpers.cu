@@ -21,7 +21,7 @@ __device__ double fact(ui k) {
 }
 
 inline __device__ void
-scan_active_vertices(int totalFlow, ui source, ui sink,
+scan_active_vertices(int totalFlow, ui total, ui source, ui sink,
                      deviceFlowNetworkPointers flowNetwork, ui *activeNodes) {
   unsigned int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
   grid_group grid = this_grid();
@@ -34,7 +34,7 @@ scan_active_vertices(int totalFlow, ui source, ui sink,
 
   /* Stride scan the V set */
   for (int u = idx; u < totalFlow; u += blockDim.x * gridDim.x) {
-    if (flowNetwork.excess[u] > 1e-6 && flowNetwork.height[u] < totalFlow &&
+    if (flowNetwork.excess[u] > 1e-6 && flowNetwork.height[u] < 2 * total &&
         u != source && u != sink) {
       activeNodes[atomicAdd(&globalCounter, 1)] = u;
     }
@@ -1145,7 +1145,8 @@ __global__ void countCliques(deviceDAGpointer D,
 __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter,
                                double *lowerBound, double *upperBound,
                                ui *ccOffset, ui *neighborSize,
-                               ui totalComponenets, ui k, double maxDensity) {
+                               ui totalComponenets, ui k, double maxDensity,
+                               ui use_ub1, ui use_ub2) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx == 0) {
     ccOffset[idx] = 0;
@@ -1158,9 +1159,22 @@ __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter,
     double lb = (double)(totalCliques) / totalSize;
     lowerBound[i] = lb;
 
-    double dem = pow(fact(k), 1.0 / k);
-    double num = pow(totalCliques, (k - 1.0) / k);
-    double ub = min(maxDensity, num / dem);
+    // double intial_x = pow(fact(k)*totalCliques,1.0/k);
+    double ub1, ub2, ub;
+    // loose implementation can be made better
+    if (use_ub2) {
+      double dem = pow(fact(k), 1.0 / k);
+      double num = pow(totalCliques, (k - 1.0) / k);
+      ub2 = num / dem;
+      ub = ub2;
+    }
+    if (use_ub1) {
+      ub1 = maxDensity;
+      ub = ub1;
+    }
+    if (use_ub1 & use_ub2) {
+      ub = min(ub1, ub2);
+    }
 
     upperBound[i] = ub;
 
@@ -1371,7 +1385,8 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
   ui sink = totalFlow - 1;
 
   while (cycle > 0) {
-    scan_active_vertices(totalFlow, source, sink, flowNetwork, activeNodes);
+    scan_active_vertices(totalFlow, total, source, sink, flowNetwork,
+                         activeNodes);
 
     grid.sync();
 
@@ -1427,7 +1442,7 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
 
 __global__ void globalRelabel(deviceFlowNetworkPointers flowNetwork,
                               deviceComponentPointers conComp, ui *compCounter,
-                              ui *changes, ui k, ui iter) {
+                              ui k, ui iter, ui *capLeft) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   grid_group grid = this_grid();
 
@@ -1441,6 +1456,7 @@ __global__ void globalRelabel(deviceFlowNetworkPointers flowNetwork,
     // printf("idx %d v %d offset %d\n", idx, i, vertexOffset);
     if (flowNetwork.flow[vertexOffset] > 1e-6) {
       flowNetwork.height[i] = 1;
+      atomicCAS(capLeft, 1, 0);
     }
   }
 
