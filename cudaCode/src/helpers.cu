@@ -1146,7 +1146,7 @@ __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter,
                                double *lowerBound, double *upperBound,
                                ui *ccOffset, ui *neighborSize,
                                ui totalComponenets, ui k, double maxDensity,
-                               ui use_ub1, ui use_ub2) {
+                               ui use_ub1) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx == 0) {
     ccOffset[idx] = 0;
@@ -1159,24 +1159,14 @@ __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter,
     double lb = (double)(totalCliques) / totalSize;
     lowerBound[i] = lb;
 
-    // double intial_x = pow(fact(k)*totalCliques,1.0/k);
-    double ub1, ub2, ub;
-    // loose implementation can be made better
-    if (use_ub2) {
+    double ub = DINF;
+
+    if (use_ub1) {
       double dem = pow(fact(k), 1.0 / k);
       double num = pow(totalCliques, (k - 1.0) / k);
-      ub2 = num / dem;
-      ub = ub2;
+      ub = num / dem;
+      upperBound[i] = ub;
     }
-    if (use_ub1) {
-      ub1 = maxDensity;
-      ub = ub1;
-    }
-    if (use_ub1 & use_ub2) {
-      ub = min(ub1, ub2);
-    }
-
-    upperBound[i] = ub;
 
     if (ub > lb) {
       ccOffset[i] = totalCliques + totalSize + 2;
@@ -1307,6 +1297,47 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork,
   }
 }
 
+__global__ void entropyBasedUB(deviceFlowNetworkPointers flowNetwork,
+                               deviceComponentPointers conComp,
+                               deviceCliquesPointer finalCliqueData,
+                               ui *compCounter, double *minSupport,
+                               double *componentCliques, ui iter, ui k) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  __shared__ double blockSum;
+  if (threadIdx.x == 0)
+    blockSum = 0.0;
+  __syncthreads();
+
+  ui start = conComp.componentOffset[iter];
+  ui end = conComp.componentOffset[iter + 1];
+  ui total = end - start;
+  // ui startClique = compCounter[iter];
+  ui totalCliques = compCounter[iter + 1] - compCounter[iter];
+
+  double localsum = 0;
+  double denom = (double)k * (double)totalCliques;
+  for (ui i = idx; i < total; i += TOTAL_THREAD) {
+    ui cliqueDegree = flowNetwork.offset[i + 1] - flowNetwork.offset[i] - 2;
+    double pv = ((double)cliqueDegree) / denom;
+    double pv2 = pv * pv;
+    localsum += pv2;
+    // printf("idx %d e %d s %d clique deg %d pv %f pv2 %f local %f
+    // \n",idx,flowNetwork.offset[i +
+    // 1],flowNetwork.offset[i],cliqueDegree,pv,pv2,localsum);
+  }
+  atomicAdd(&blockSum, localsum);
+  __syncthreads();
+
+  // one thread per block adds block sum to global
+  if (threadIdx.x == 0) {
+    // printf("blck %d shared %f total %f \n",blockIdx.x,blockSum,*minSupport);
+    atomicAdd(minSupport, blockSum);
+  }
+  if (idx == 0) {
+    *componentCliques = (double)totalCliques;
+  }
+}
+
 __global__ void preFlow(deviceFlowNetworkPointers flowNetwork,
                         deviceComponentPointers conComp, ui *compCounter,
                         double *totalExcess, ui iter) {
@@ -1376,7 +1407,7 @@ __global__ void pushRelabel(deviceFlowNetworkPointers flowNetwork,
   // ui startClique = compCounter[iter];
   ui totalCliques = compCounter[iter + 1] - compCounter[iter];
   int totalFlow = total + totalCliques + 2;
-  int cycle = totalFlow;
+  int cycle = 2 * total;
   extern __shared__ int SharedMemory[];
   int *sheight = SharedMemory;
   int *svid = (int *)&SharedMemory[blockDim.x];

@@ -114,6 +114,12 @@ __global__ void createFlowNetwork(deviceFlowNetworkPointers flowNetwork,
                                   double *lowerBound, ui *counter, ui iter,
                                   ui k, ui t);
 
+__global__ void entropyBasedUB(deviceFlowNetworkPointers flowNetwork,
+                               deviceComponentPointers conComp,
+                               deviceCliquesPointer finalCliqueData,
+                               ui *compCounter, double *minSupport,
+                               double *componentCliques, ui iter, ui k);
+
 __global__ void preFlow(deviceFlowNetworkPointers flowNetwork,
                         deviceComponentPointers conComp, ui *compCounter,
                         double *totalExcess, ui iter);
