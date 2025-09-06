@@ -141,6 +141,3 @@ extern deviceComponentPointers conComp;
 extern devicePrunedNeighbors prunedNeighbors;
 extern deviceCliquesPointer finalCliqueData;
 extern deviceFlowNetworkPointers flowNetwork;
-extern ui use_ub1;
-extern ui use_ub2;
-extern ui use_ub3;

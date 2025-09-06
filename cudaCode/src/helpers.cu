@@ -1145,8 +1145,7 @@ __global__ void countCliques(deviceDAGpointer D,
 __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter,
                                double *lowerBound, double *upperBound,
                                ui *ccOffset, ui *neighborSize,
-                               ui totalComponenets, ui k, double maxDensity,
-                               ui use_ub1) {
+                               ui totalComponenets, ui k, double maxDensity) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx == 0) {
     ccOffset[idx] = 0;
@@ -1161,12 +1160,10 @@ __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter,
 
     double ub = DINF;
 
-    if (use_ub1) {
-      double dem = pow(fact(k), 1.0 / k);
-      double num = pow(totalCliques, (k - 1.0) / k);
-      ub = num / dem;
-      upperBound[i] = ub;
-    }
+    double dem = pow(fact(k), 1.0 / k);
+    double num = pow(totalCliques, (k - 1.0) / k);
+    ub = num / dem;
+    upperBound[i] = ub;
 
     if (ub > lb) {
       ccOffset[i] = totalCliques + totalSize + 2;

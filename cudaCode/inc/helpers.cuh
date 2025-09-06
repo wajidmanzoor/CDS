@@ -99,8 +99,7 @@ __global__ void rearrangeCliqueData(deviceComponentPointers conComp,
 __global__ void getLbUbandSize(deviceComponentPointers conComp, ui *compCounter,
                                double *lowerBound, double *upperBound,
                                ui *ccOffset, ui *neighborSize,
-                               ui totalComponenets, ui k, double maxDensity,
-                               ui use_ub1, ui use_ub2);
+                               ui totalComponenets, ui k, double maxDensity);
 
 __global__ void createFlowNetworkOffset(deviceFlowNetworkPointers flowNetwork,
                                         deviceComponentPointers conComp,

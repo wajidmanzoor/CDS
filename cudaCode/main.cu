@@ -588,7 +588,7 @@ double dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
 
   getLbUbandSize<<<BLK_NUMS, BLK_DIM>>>(
       conComp, compCounter, lowerBound, upperBound, flownetworkSize,
-      flownetworkNeighSize, totalComponents, k, maxDensity1, use_ub1, use_ub2);
+      flownetworkNeighSize, totalComponents, k, maxDensity1);
   cudaDeviceSynchronize();
   CUDA_CHECK_ERROR("Get UB LU and Size");
 
@@ -650,11 +650,10 @@ double dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
                       cudaMemcpyDeviceToHost));
     lbArray.push_back(lb);
     ubArray.push_back(ub);
-    if (use_ub2) {
-      ub = min(maxDensity1, ub);
-      chkerr(cudaMemcpy(upperBound + iter, &ub, sizeof(double),
-                        cudaMemcpyHostToDevice));
-    }
+
+    ub = min(maxDensity1, ub);
+    chkerr(cudaMemcpy(upperBound + iter, &ub, sizeof(double),
+                      cudaMemcpyHostToDevice));
 
     // cout << "lb " << lb << " ub " << ub << endl;
     if (ub > DSD_density) {
@@ -681,31 +680,29 @@ double dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
           thrust::device_pointer_cast(flowNetwork.offset + vertexSize + 1),
           thrust::device_pointer_cast(flowNetwork.offset));
 
-      if (use_ub3) {
-        CPUminSupport = 0.0;
-        CPUcompCliques = 0.0;
-        chkerr(cudaMemcpy(componentCliques, &CPUcompCliques, sizeof(double),
-                          cudaMemcpyHostToDevice));
-        chkerr(cudaMemcpy(minSupport, &CPUminSupport, sizeof(double),
-                          cudaMemcpyHostToDevice));
+      CPUminSupport = 0.0;
+      CPUcompCliques = 0.0;
+      chkerr(cudaMemcpy(componentCliques, &CPUcompCliques, sizeof(double),
+                        cudaMemcpyHostToDevice));
+      chkerr(cudaMemcpy(minSupport, &CPUminSupport, sizeof(double),
+                        cudaMemcpyHostToDevice));
 
-        entropyBasedUB<<<BLK_NUMS, BLK_DIM>>>(
-            flowNetwork, conComp, finalCliqueData, compCounter, minSupport,
-            componentCliques, iter, k);
-        cudaDeviceSynchronize();
-        CUDA_CHECK_ERROR("Get Entropy Based Upper Bound");
-        chkerr(cudaMemcpy(&CPUminSupport, minSupport, sizeof(double),
-                          cudaMemcpyDeviceToHost));
-        chkerr(cudaMemcpy(&CPUcompCliques, componentCliques, sizeof(double),
-                          cudaMemcpyDeviceToHost));
+      entropyBasedUB<<<BLK_NUMS, BLK_DIM>>>(
+          flowNetwork, conComp, finalCliqueData, compCounter, minSupport,
+          componentCliques, iter, k);
+      cudaDeviceSynchronize();
+      CUDA_CHECK_ERROR("Get Entropy Based Upper Bound");
+      chkerr(cudaMemcpy(&CPUminSupport, minSupport, sizeof(double),
+                        cudaMemcpyDeviceToHost));
+      chkerr(cudaMemcpy(&CPUcompCliques, componentCliques, sizeof(double),
+                        cudaMemcpyDeviceToHost));
 
-        double eub = CPUcompCliques * CPUminSupport;
-        eubArray.push_back(eub);
+      double eub = CPUcompCliques * CPUminSupport;
+      eubArray.push_back(eub);
 
-        ub = min(eub, ub);
-        chkerr(cudaMemcpy(upperBound + iter, &ub, sizeof(double),
-                          cudaMemcpyHostToDevice));
-      }
+      ub = min(eub, ub);
+      chkerr(cudaMemcpy(upperBound + iter, &ub, sizeof(double),
+                        cudaMemcpyHostToDevice));
 
       ui *counter;
       chkerr(cudaMalloc((void **)&counter, total * sizeof(ui)));
