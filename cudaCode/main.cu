@@ -614,13 +614,11 @@ double dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
   chkerr(cudaMalloc((void **)&gpuConverged, sizeof(ui)));
   chkerr(cudaMalloc((void **)&capLeft, sizeof(ui)));
 
-  /*
   double *minSupport, *componentCliques;
   double CPUminSupport = 0.0;
   double CPUcompCliques = 0.0;
   chkerr(cudaMalloc((void **)&minSupport, sizeof(double)));
   chkerr(cudaMalloc((void **)&componentCliques, sizeof(double)));
-  */
 
   ui cpuConverged = 0;
 
@@ -653,7 +651,7 @@ double dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
     lbArray.push_back(lb);
     ubArray.push_back(ub);
 
-    /*ub = maxDensity1;
+    /*ub = min(maxDensity1, ub);
     chkerr(cudaMemcpy(upperBound + iter, &ub, sizeof(double),
                       cudaMemcpyHostToDevice));*/
 
@@ -682,7 +680,7 @@ double dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
           thrust::device_pointer_cast(flowNetwork.offset + vertexSize + 1),
           thrust::device_pointer_cast(flowNetwork.offset));
 
-      /*CPUminSupport = 0.0;
+      CPUminSupport = 0.0;
       CPUcompCliques = 0.0;
       chkerr(cudaMemcpy(componentCliques, &CPUcompCliques, sizeof(double),
                         cudaMemcpyHostToDevice));
@@ -702,9 +700,9 @@ double dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
       double eub = CPUcompCliques * CPUminSupport;
       eubArray.push_back(eub);
 
-      ub = min(eub, ub);
+      ub = eub;
       chkerr(cudaMemcpy(upperBound + iter, &ub, sizeof(double),
-                        cudaMemcpyHostToDevice));*/
+                        cudaMemcpyHostToDevice));
 
       ui *counter;
       chkerr(cudaMalloc((void **)&counter, total * sizeof(ui)));
