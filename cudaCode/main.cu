@@ -653,9 +653,9 @@ double dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
     lbArray.push_back(lb);
     ubArray.push_back(ub);
 
-    ub = maxDensity1;
+    /*ub = maxDensity1;
     chkerr(cudaMemcpy(upperBound + iter, &ub, sizeof(double),
-                      cudaMemcpyHostToDevice));
+                      cudaMemcpyHostToDevice));*/
 
     // cout << "lb " << lb << " ub " << ub << endl;
     if (ub > DSD_density) {
