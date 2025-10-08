@@ -12,7 +12,7 @@ $$
 \rho(G(D), \psi) = \frac{n(G(D), \psi)}{|D|}
 $$
 
-where $n(G(D), \psi)$ is the number of $k$-clique instances in $G(D)$, and each instance represents a fully connected vertex subset of size $k$.  
+where $n(G(D), \psi)$ is the number of $k$ -clique instances in $G(D)$, and each instance represents a fully connected vertex subset of size $k$.  
 This generalizes traditional densest subgraph discovery (based on edges) to **higher-order structures**, enabling the detection of tightly connected communities that go beyond pairwise interactions.
 
 ---
