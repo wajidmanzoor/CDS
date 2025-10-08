@@ -6,13 +6,13 @@ It integrates **warp-level $k$-clique enumeration**, **clique-core–based pruni
 ---
 
 ## Problem Statement
-Given an undirected graph $ G = (V, E) $ and an integer $ k \ge 2 $, the goal is to find a vertex subset $ D \subseteq V $ whose induced subgraph $ G(D) $ maximizes the **$k$-clique density**:
+Given an undirected graph $G = (V, E)$ and an integer $k \ge 2$, the goal is to find a vertex subset $D \subseteq V$ whose induced subgraph $G(D)$ maximizes the **$k$-clique density**:
 
 $$
 \rho(G(D), \psi) = \frac{n(G(D), \psi)}{|D|}
 $$
 
-where $ n(G(D), \psi) $ is the number of $k$-clique instances in $ G(D) $, and each instance represents a fully connected vertex subset of size $ k $.  
+where $n(G(D), \psi)$ is the number of $k$-clique instances in $G(D)$, and each instance represents a fully connected vertex subset of size $k$.  
 This generalizes traditional densest subgraph discovery (based on edges) to **higher-order structures**, enabling the detection of tightly connected communities that go beyond pairwise interactions.
 
 ---
