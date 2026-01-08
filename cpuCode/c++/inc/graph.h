@@ -6,9 +6,11 @@ class Graph {
 public:
   ui n;
   ui m;
-  ui maxCliqueDegree;
+  long maxCliqueDegree;
   ui maxDegree;
-
+  ui maxCore;
+  long totalCliques;
+  long maxCliquecore;
   std::vector<std::vector<ui>> adjacencyList;
   std::vector<ui> degree;
   std::vector<ui> core;
