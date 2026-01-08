@@ -12,7 +12,7 @@ CDS ::CDS(Graph *graph, Motif *motif) {
   this->motif = motif;
 }
 
-vector<vector<double>> CDS ::cliqueCoreDecompose() {
+void CDS ::cliqueCoreDecompose(vector<vector<double>> &results) {
 
   vector<int> mark;
   mark.resize(graph->n, 0);
@@ -23,9 +23,9 @@ vector<vector<double>> CDS ::cliqueCoreDecompose() {
   vector<int> newMap;
   newMap.resize(graph->n, 0);
 
-  unordered_map<int, long> twoDNeighborhood;
-  // TODO add clique enemuration.
+  cliqueEnumerationFast();
 
+  unordered_map<int, long> twoDNeighborhood;
   for (ui i = 0; i < graph->n; i++) {
     graph->cliqueCore[i] = graph->cliqueDegree[i];
   }
@@ -44,7 +44,6 @@ vector<vector<double>> CDS ::cliqueCoreDecompose() {
 
   // data structure used to save clique core decompose results
 
-  vector<vector<double>> results;
   results.resize(graph->n + 1, vector<double>(5, 0.0));
   results[0][2] = totalCliques / static_cast<double>(graph->n);
   results[0][3] = totalCliques;
@@ -100,7 +99,7 @@ vector<vector<double>> CDS ::cliqueCoreDecompose() {
     results[count][0] = index;
     results[count][1] = graph->cliqueDegree[index];
     if (graph->cliqueDegree[index] > 0) {
-      twoDNeighborhood = get2Dneighborhood(index, mark, arrayIndex, newMap);
+      get2Dneighborhood(twoDNeighborhood, index, mark, arrayIndex, newMap);
       long deleteCount = 0;
       if (!twoDNeighborhood.empty()) {
         for (auto &it : twoDNeighborhood) {
@@ -132,14 +131,12 @@ vector<vector<double>> CDS ::cliqueCoreDecompose() {
     }
     mark[index] = 1;
   }
-
-  return results;
 }
 
-unordered_map<int, long> CDS::get2Dneighborhood(int index, vector<int> mark,
-                                                vector<int> array,
-                                                vector<int> map_s) {
-
+void CDS::get2Dneighborhood(unordered_map<int, long> &subgraphResults,
+                            int index, vector<int> mark, vector<int> array,
+                            vector<int> map_s) {
+  subgraphResults.clear();
   vector<int> tempList;
   tempList.push_back(index);
   array[index] = 1;
@@ -191,80 +188,83 @@ unordered_map<int, long> CDS::get2Dneighborhood(int index, vector<int> mark,
     }
   }
 
-  vector<long> subGraphCliqueDegree;
+  vector<ui> subGraphCliqueDegree;
   subGraphCliqueDegree.resize(count, 0);
 
-  // TODO: add clique enumeration for subgraph and return the count of cliques
-  // for each vertex in the subgraph.
+  cliqueEnumerationSubgraph(subGraph, subGraphCliqueDegree, motif->size, 0);
 
-  unordered_map<int, long> subgraphResults;
   for (ui i = 0; i < count; i++) {
     if (subGraphCliqueDegree[i] > 0) {
       subgraphResults[mapArray[i]] = subGraphCliqueDegree[i];
     }
   }
-  return subgraphResults;
 }
 
 void CDS::getlistingOrder(vector<ui> &order) {
 
-  // Todo: add core decompose
-
   // verticies sorted by reverse core values
   vector<ui> reverseCoreSortedVertices(graph->n);
 
-  coreDecompose(reverseCoreSortedVertices);
+  coreDecompose(graph->adjacencyList, reverseCoreSortedVertices, graph->degree,
+                graph->core, true);
   order.resize(graph->n, 0);
   for (ui i = 0; i < reverseCoreSortedVertices.size(); i++) {
     order[reverseCoreSortedVertices[i]] = i + 1;
   }
 }
 
-void CDS::coreDecompose(vector<ui> &reverseCoreSortedVertices) {
-  reverseCoreSortedVertices.resize(graph->n, 0);
-  graph->maxDegree = 0;
-  for (ui i = 0; i < graph->n; i++) {
-    if (graph->degree[i] > graph->maxDegree) {
-      graph->maxDegree = graph->degree[i];
+void CDS::coreDecompose(const vector<vector<ui>> adjList,
+                        vector<ui> &reverseCoreSortedVertices,
+                        vector<ui> &degree, vector<ui> &core, bool fullGraph) {
+  ui n = adjList.size();
+  reverseCoreSortedVertices.resize(n, 0);
+  ui maxDegree = 0;
+  core.resize(n, 0);
+  for (ui i = 0; i < n; i++) {
+    if (degree[i] > maxDegree) {
+      maxDegree = degree[i];
     }
-    graph->core[i] = graph->degree[i];
+    core[i] = degree[i];
+  }
+  if (fullGraph) {
+    graph->maxDegree = maxDegree;
   }
 
   vector<ui> bins;
-  bins.resize(graph->maxDegree + 1, 0);
+  bins.resize(maxDegree + 1, 0);
 
-  for (ui i = 0; i < graph->n; i++) {
-    bins[graph->degree[i]]++;
+  for (ui i = 0; i < n; i++) {
+    bins[degree[i]]++;
   }
 
   ui start = 0;
-  for (ui i = 0; i <= graph->maxDegree; i++) {
+  for (ui i = 0; i <= maxDegree; i++) {
     ui temp = bins[i];
     bins[i] = start;
     start += temp;
   }
   vector<ui> pos;
-  pos.resize(graph->n, 0);
+  pos.resize(n, 0);
   vector<ui> sortedVertices;
-  sortedVertices.resize(graph->n, 0);
-  for (ui i = 0; i < graph->n; i++) {
-    pos[i] = bins[graph->degree[i]];
+  sortedVertices.resize(n, 0);
+  for (ui i = 0; i < n; i++) {
+    pos[i] = bins[degree[i]];
     sortedVertices[pos[i]] = i;
-    bins[graph->degree[i]]++;
+    bins[degree[i]]++;
   }
 
-  for (ui i = graph->maxDegree; i > 0; i--) {
+  for (ui i = maxDegree; i > 0; i--) {
     bins[i] = bins[i - 1];
   }
   bins[0] = 0;
 
-  for (ui i = 0; i < graph->n; i++) {
+  for (ui i = 0; i < n; i++) {
     int vertex = sortedVertices[i];
-    graph->core[vertex] = graph->degree[vertex];
-    for (ui j = 0; j < graph->adjacencyList[vertex].size(); j++) {
-      int neighbor = graph->adjacencyList[vertex][j];
-      if (graph->core[neighbor] > graph->core[vertex]) {
-        int du = graph->core[neighbor];
+    core[vertex] = degree[vertex];
+    for (ui j = 0; j < adjList[vertex].size(); j++) {
+      int neighbor = adjList[vertex][j];
+      if (core[neighbor] > core[vertex]) {
+        int du = core[neighbor];
         int pu = pos[neighbor];
         int pw = bins[du];
         int w = sortedVertices[pw];
@@ -275,9 +275,9 @@ void CDS::coreDecompose(vector<ui> &reverseCoreSortedVertices) {
           sortedVertices[pw] = neighbor;
         }
         bins[du]++;
-        graph->core[neighbor]--;
+        core[neighbor]--;
       }
-      reverseCoreSortedVertices[graph->n - i - 1] = vertex;
+      reverseCoreSortedVertices[n - i - 1] = vertex;
     }
   }
 }
@@ -286,7 +286,7 @@ void CDS::cliqueEnumerationFast() {
   vector<ui> order;
   getlistingOrder(order);
   vector<vector<ui>> DAG;
-  generateDAG(DAG, order);
+  generateDAG(graph->adjacencyList, DAG, order);
   vector<ui> partialClique;
   vector<ui> candidates;
   for (ui i = 0; i < graph->n; i++) {
@@ -302,21 +302,22 @@ void CDS::cliqueEnumerationFast() {
               validNeighborCount);
 }
 
-void CDS::generateDAG(vector<vector<ui>> &DAG, vector<ui> &order) {
+void CDS::generateDAG(const vector<vector<ui>> adjList, vector<vector<ui>> &DAG,
+                      vector<ui> &order) {
   int count;
-  DAG.resize(graph->n);
-  for (ui i = 0; i < graph->n; i++) {
+  DAG.resize(adjList.size());
+  for (ui i = 0; i < adjList.size(); i++) {
     count = 0;
-    for (ui j = 0; j < graph->adjacencyList[i].size(); j++) {
-      if (order[graph->adjacencyList[i][j]] > order[i]) {
+    for (ui j = 0; j < adjList[i].size(); j++) {
+      if (order[adjList[i][j]] > order[i]) {
         count++;
       }
     }
     DAG[i].resize(count, 0);
     int index = 0;
-    for (ui j = 0; j < graph->adjacencyList[i].size(); j++) {
-      if (order[graph->adjacencyList[i][j]] > order[i]) {
-        DAG[i][index] = graph->adjacencyList[i][j];
+    for (ui j = 0; j < adjList[i].size(); j++) {
+      if (order[adjList[i][j]] > order[i]) {
+        DAG[i][index] = adjList[i][j];
         index++;
       }
     }
@@ -324,8 +325,8 @@ void CDS::generateDAG(vector<vector<ui>> &DAG, vector<ui> &order) {
 }
 
 void CDS::listCliques(ui k, vector<ui> &partialClique, vector<ui> &candidates,
-                      vector<ui> &label, vector<vector<ui>> DAG,
-                      vector<ui> validNeighborCount) {
+                      vector<ui> &label, vector<vector<ui>> &DAG,
+                      vector<ui> &validNeighborCount) {
 
   if (k == 2) {
     string cliqueString = "";
@@ -340,7 +341,7 @@ void CDS::listCliques(ui k, vector<ui> &partialClique, vector<ui> &candidates,
         cliqueCount++;
         graph->totalCliques++;
         graph->cliqueDegree[DAG[temp][j]]++;
-        graph->cliqueCore[temp]++;
+        graph->cliqueDegree[temp]++;
       }
     }
 
@@ -389,6 +390,128 @@ void CDS::listCliques(ui k, vector<ui> &partialClique, vector<ui> &candidates,
       for (ui j = 0; j < validNeighbors.size(); j++) {
         label[validNeighbors[j]] = k;
       }
+    }
+  }
+}
+
+void CDS::cliqueEnumerationSubgraph(vector<vector<ui>> &subGraph,
+                                    vector<ui> &subGraphCliqueDegree,
+                                    ui motifSize, ui vertex) {
+  vector<ui> reverseCoreSortedVertices(subGraph.size());
+  vector<ui> order;
+  reverseCoreSortedVertices.resize(subGraph.size(), 0);
+  vector<ui> degree;
+  degree.resize(subGraph.size(), 0);
+  for (ui i = 0; i < subGraph.size(); i++) {
+    degree[i] = subGraph[i].size();
+  }
+  vector<ui> core;
+  coreDecompose(subGraph, reverseCoreSortedVertices, degree, core, false);
+
+  order.resize(subGraph.size(), 0);
+  for (ui i = 0; i < reverseCoreSortedVertices.size(); i++) {
+    order[reverseCoreSortedVertices[i]] = i + 1;
+  }
+  vector<vector<ui>> DAG;
+  generateDAG(subGraph, DAG, order);
+  vector<ui> partialClique;
+  vector<ui> candidates;
+  for (ui i = 0; i < subGraph.size(); i++) {
+    candidates.push_back(i);
+  }
+  vector<ui> label;
+  label.resize(subGraph.size(), motif->size);
+  vector<ui> validNeighborCount;
+  validNeighborCount.resize(subGraph.size(), 0);
+
+  listCliqueContainsVertex(motif->size, partialClique, candidates, label, DAG,
+                           validNeighborCount, subGraphCliqueDegree, 0);
+}
+
+void CDS::listCliqueContainsVertex(ui k, vector<ui> &partialClique,
+                                   vector<ui> &candidates, vector<ui> &label,
+                                   vector<vector<ui>> &DAG,
+                                   vector<ui> &validNeighborCount,
+                                   vector<ui> &cliqueDegree, ui vertex) {
+  if (k == 2) {
+    bool onenode = false;
+    string cliqueString = "";
+    for (ui i = 0; i < partialClique.size(); i++) {
+      cliqueString += to_string(partialClique[0]) + " ";
+      if (partialClique[i] == vertex) {
+        onenode = true;
+      }
+    }
+
+    int cliqueCount = 0;
+    for (ui i = 0; i < candidates.size(); i++) {
+      int temp = candidates[i];
+      for (int j = 0; j < validNeighborCount[temp]; j++) {
+        if (onenode || temp == vertex || DAG[temp][j] == vertex) {
+          cliqueCount++;
+          cliqueDegree[DAG[temp][j]]++;
+          cliqueDegree[temp]++;
+        }
+      }
+    }
+
+    for (ui i = 0; i < candidates.size(); i++) {
+      int temp = candidates[i];
+      cliqueDegree[temp] += cliqueCount;
+    }
+
+  } else {
+    for (int i = 0; i < candidates.size(); i++) {
+      int temp = candidates[i];
+      vector<ui> validNeighbors;
+      for (int j = 0; j < DAG[temp].size(); j++) {
+        if (label[DAG[temp][j]] == k) {
+          label[DAG[temp][j]] = k - 1;
+          validNeighbors.push_back(DAG[temp][j]);
+        }
+      }
+
+      for (int j = 0; j < validNeighbors.size(); j++) {
+
+        ui canTemp = validNeighbors[j];
+        int index = 0;
+        for (ui m = DAG[canTemp].size() - 1; m > index; --m) {
+          if (label[DAG[canTemp][m]] == k - 1) {
+            while (index < m && label[DAG[canTemp][index]] == k - 1) {
+              index++;
+            }
+            if (label[DAG[canTemp][index]] != k - 1) {
+              int temp1 = DAG[canTemp][m];
+              DAG[canTemp][m] = DAG[canTemp][index];
+              DAG[canTemp][index] = temp1;
+            }
+          }
+        }
+
+        if (DAG[canTemp].size() != 0 && label[DAG[canTemp][index]] == k - 1)
+          index++;
+
+        validNeighborCount[canTemp] = index;
+      }
+      partialClique.push_back(temp);
+      listCliqueContainsVertex(motif->size, partialClique, candidates, label,
+                               DAG, validNeighborCount, cliqueDegree, 0);
+      partialClique.pop_back();
+      for (ui j = 0; j < validNeighbors.size(); j++) {
+        label[validNeighbors[j]] = k;
+      }
+    }
+  }
+}
+
+void CDS::DSD() {
+  vector<vector<double>> results;
+  cliqueCoreDecompose(results);
+  if (debug) {
+    for (ui i = 0; i < results.size(); i++) {
+      cout << "Vertex: " << results[i][0] << " Clique Degree: " << results[i][1]
+           << " Density: " << results[i][2]
+           << " Total Cliques: " << results[i][3] << endl;
     }
   }
 }
