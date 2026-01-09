@@ -581,6 +581,154 @@ void CDS::locateDensestCore(vector<vector<double>> &coreResults,
   densestCore.maxCliqueCore = graph->maxCliquecore;
 }
 
+void CDS::cliqueEnumerationListRecord(
+    vector<vector<ui>> newGraph, unordered_map<string, vector<int>> &cliqueData,
+    vector<ui> &cliqueDegree, ui motifSize) {
+  vector<ui> reverseCoreSortedVertices(newGraph.size());
+  vector<ui> order;
+  reverseCoreSortedVertices.resize(newGraph.size(), 0);
+  vector<ui> degree;
+  degree.resize(newGraph.size(), 0);
+  for (ui i = 0; i < newGraph.size(); i++) {
+    degree[i] = newGraph[i].size();
+  }
+  vector<ui> core;
+  coreDecompose(newGraph, reverseCoreSortedVertices, degree, core, false);
+
+  order.resize(newGraph.size(), 0);
+  for (ui i = 0; i < reverseCoreSortedVertices.size(); i++) {
+    order[reverseCoreSortedVertices[i]] = i + 1;
+  }
+  vector<vector<ui>> DAG;
+  generateDAG(newGraph, DAG, order);
+  vector<ui> partialClique;
+  vector<ui> candidates;
+  for (ui i = 0; i < newGraph.size(); i++) {
+    candidates.push_back(i);
+  }
+  vector<ui> label;
+  label.resize(newGraph.size(), motif->size);
+  vector<ui> validNeighborCount;
+  validNeighborCount.resize(newGraph.size(), 0);
+  listCliqueRecord(motif->size, partialClique, candidates, label, DAG,
+                   validNeighborCount, cliqueData, cliqueDegree);
+}
+
+void CDS::listCliqueRecord(ui k, vector<ui> &partialClique,
+                           vector<ui> &candidates, vector<ui> &label,
+                           vector<vector<ui>> &DAG,
+                           vector<ui> &validNeighborCount,
+                           unordered_map<string, vector<int>> &cliqueData,
+                           vector<ui> cliqueDegree) {
+  if (k == 2) {
+    string cliqueString = "";
+    for (ui i = 0; i < partialClique.size(); i++) {
+      cliqueString += to_string(partialClique[0]) + " ";
+    }
+
+    int cliqueCount = 0;
+    for (ui i = 0; i < candidates.size(); i++) {
+      int temp = candidates[i];
+      for (int j = 0; j < validNeighborCount[temp]; j++) {
+        cliqueString = cliqueString + to_string(temp) + to_string(DAG[temp][j]);
+        cliqueCount++;
+        cliqueDegree[DAG[temp][j]]++;
+        cliqueDegree[temp]++;
+        vector<int> tempArr(motif->size + 1);
+        for (ui x = 0; x < partialClique.size(); x++) {
+          tempArr[x] = partialClique[x];
+        }
+        tempArr[motif->size - 2] = temp;
+        tempArr[motif->size - 1] = DAG[temp][j];
+        tempArr[motif->size] = 1;
+
+        cliqueData[cliqueString] = tempArr;
+      }
+    }
+
+    for (ui i = 0; i < candidates.size(); i++) {
+      int temp = candidates[i];
+      cliqueDegree[temp] += cliqueCount;
+    }
+
+  } else {
+    for (int i = 0; i < candidates.size(); i++) {
+      int temp = candidates[i];
+      vector<ui> validNeighbors;
+      for (int j = 0; j < DAG[temp].size(); j++) {
+        if (label[DAG[temp][j]] == k) {
+          label[DAG[temp][j]] = k - 1;
+          validNeighbors.push_back(DAG[temp][j]);
+        }
+      }
+
+      for (int j = 0; j < validNeighbors.size(); j++) {
+
+        ui canTemp = validNeighbors[j];
+        int index = 0;
+        for (ui m = DAG[canTemp].size() - 1; m > index; --m) {
+          if (label[DAG[canTemp][m]] == k - 1) {
+            while (index < m && label[DAG[canTemp][index]] == k - 1) {
+              index++;
+            }
+            if (label[DAG[canTemp][index]] != k - 1) {
+              int temp1 = DAG[canTemp][m];
+              DAG[canTemp][m] = DAG[canTemp][index];
+              DAG[canTemp][index] = temp1;
+            }
+          }
+        }
+
+        if (DAG[canTemp].size() != 0 && label[DAG[canTemp][index]] == k - 1)
+          index++;
+
+        validNeighborCount[canTemp] = index;
+      }
+      partialClique.push_back(temp);
+      listCliqueRecord(k - 1, partialClique, candidates, label, DAG,
+                       validNeighborCount, cliqueData, cliqueDegree);
+      partialClique.pop_back();
+      for (ui j = 0; j < validNeighbors.size(); j++) {
+        label[validNeighbors[j]] = k;
+      }
+    }
+  }
+}
+
+int pruneInvalidEdges(vector<vector<ui>> &oldGraph,
+                      vector<vector<ui>> &newGraph,
+                      unordered_map<string, vector<int>> &cliqueData) {
+  int count = 0;
+  vector<unordered_map<int, int>> validEdges(oldGraph.size());
+
+  for (const auto &entry : cliqueData) {
+    const vector<int> &temp = entry.second;
+    for (ui i = 0; i < temp.size() - 1; i++) {
+      for (ui j = 0; j < temp.size() - 1; j++) {
+        if (i != j) {
+          if (validEdges[temp[i]].find(temp[j]) == validEdges[temp[i]].end()) {
+            validEdges[temp[i]][temp[j]] = 0;
+          }
+        }
+      }
+    }
+  }
+
+  newGraph.resize(oldGraph.size());
+
+  int totalEdges = 0;
+
+  for (ui i = 0; i < newGraph.size(); i++) {
+    for (ui j = 0; j < oldGraph[i].size(); j++) {
+      if (validEdges[i].find(oldGraph[i][j]) != validEdges[i].end()) {
+        newGraph[i].push_back(oldGraph[i][j]);
+        totalEdges += 1;
+      }
+    }
+  }
+  return totalEdges / 2;
+}
+
 void CDS::DSD() {
   vector<vector<double>> results;
   cliqueCoreDecompose(results);
@@ -595,4 +743,13 @@ void CDS::DSD() {
 
   DensestCoreData densestCore;
   locateDensestCore(results, densestCore);
+  unordered_map<string, vector<int>> cliqueData;
+  vector<ui> cliqueDegree;
+  cliqueEnumerationListRecord(densestCore.graph, cliqueData, cliqueDegree,
+                              motif->size);
+
+  vector<vector<ui>> newGraph;
+
+  int validEdgeCount =
+      pruneInvalidEdges(densestCore.graph, newGraph, cliqueData);
 }

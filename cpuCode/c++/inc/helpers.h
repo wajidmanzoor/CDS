@@ -27,14 +27,26 @@ private:
                                      vector<vector<ui>> &DAG,
                                      vector<ui> &validNeighborCount,
                                      vector<ui> &cliqueDegree, ui vertex);
+  void listCliqueRecord(ui k, vector<ui> &partialClique, vector<ui> &candidates,
+                        vector<ui> &label, vector<vector<ui>> &DAG,
+                        vector<ui> &validNeighborCount,
+                        unordered_map<string, vector<int>> &cliqueData,
+                        vector<ui> cliqueDegree);
 
 public:
   CDS();
   CDS(Graph *graph, Motif *motif);
   void cliqueCoreDecompose(vector<vector<double>> &results);
-  void cliqueEnumerationListRecord();
+  void
+  cliqueEnumerationListRecord(vector<vector<ui>> newGraph,
+                              unordered_map<string, vector<int>> &cliqueData,
+                              vector<ui> &cliqueDegree, ui motifSize);
   void locateDensestCore(vector<vector<double>> &coreResults,
                          DensestCoreData &densestCore);
+
+  int pruneInvalidEdges(vector<vector<ui>> &oldGraph,
+                        vector<vector<ui>> &newGraph,
+                        unordered_map<string, vector<int>> &cliqueData);
 
   void DSD();
 };
