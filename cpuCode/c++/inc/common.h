@@ -40,3 +40,13 @@ typedef unsigned long long ull;
 
 const int inf = 1e9;
 const double DINF = 1e9;
+
+struct DensestCoreData {
+  vector<vector<ui>> graph;
+  vector<ui> reverseMap;
+  int lowerBound;
+  int delVertexIndex;
+  int delCliqueCount;
+  double density;
+  int maxCliqueCore;
+};

@@ -504,6 +504,83 @@ void CDS::listCliqueContainsVertex(ui k, vector<ui> &partialClique,
   }
 }
 
+void CDS::locateDensestCore(vector<vector<double>> &coreResults,
+                            DensestCoreData &densestCore) {
+  graph->maxCliquecore = 0;
+  double max = coreResults[0][2];
+  for (ui i = 1; i < graph->n; i++) {
+    if (max < coreResults[i][2]) {
+      max = coreResults[i][2];
+    }
+    if (graph->maxCliquecore < coreResults[i][1]) {
+      graph->maxCliquecore = coreResults[i][1];
+    }
+  }
+
+  int lowerBound = (int)ceil(max);
+
+  int index = 1;
+  vector<int> deletedVertices;
+  deletedVertices.resize(graph->n, 0);
+  for (; index < graph->n; index++) {
+    if (coreResults[index][1] >= lowerBound) {
+      deletedVertices.push_back(coreResults[index][0]);
+      break;
+    }
+    deletedVertices[(int)coreResults[index][0]] = -1;
+  }
+
+  int temp = 0;
+  for (ui i = 0; i < graph->n; i++) {
+    if (deletedVertices[i] == 0) {
+      deletedVertices[i] = temp;
+      temp++;
+    }
+  }
+
+  vector<vector<double>> newCoreResults;
+  newCoreResults.resize(temp, vector<double>(2));
+
+  densestCore.graph.resize(temp);
+
+  ui newGraphSize = temp;
+
+  temp = 0;
+  for (ui i = index; i < graph->n; i++) {
+    int m = (int)coreResults[i][0];
+    newCoreResults[temp][0] = deletedVertices[m];
+
+    newCoreResults[temp][1] = coreResults[i][1];
+    temp++;
+  }
+
+  for (ui i = 0; i < graph->n; i++) {
+    if (deletedVertices[i] != -1) {
+      for (ui j = 0; j < graph->adjacencyList[i].size(); j++) {
+        int neighbor = graph->adjacencyList[i][j];
+        if (deletedVertices[neighbor] != -1) {
+          densestCore.graph[deletedVertices[i]].push_back(
+              deletedVertices[neighbor]);
+        }
+      }
+    }
+  }
+
+  densestCore.reverseMap.resize(newGraphSize, 0);
+
+  for (ui i = 0; i < deletedVertices.size(); i++) {
+    if (deletedVertices[i] != -1) {
+      densestCore.reverseMap[deletedVertices[i]] = i;
+    }
+  }
+  densestCore.lowerBound = lowerBound;
+  densestCore.delVertexIndex = index - 1;
+  densestCore.delCliqueCount =
+      (int)(coreResults[0][3] - coreResults[index - 1][3]);
+  densestCore.density = coreResults[index - 1][2];
+  densestCore.maxCliqueCore = graph->maxCliquecore;
+}
+
 void CDS::DSD() {
   vector<vector<double>> results;
   cliqueCoreDecompose(results);
@@ -511,7 +588,11 @@ void CDS::DSD() {
     for (ui i = 0; i < results.size(); i++) {
       cout << "Vertex: " << results[i][0] << " Clique Degree: " << results[i][1]
            << " Density: " << results[i][2]
-           << " Total Cliques: " << results[i][3] << endl;
+           << " Total Cliques remaining: " << results[i][3]
+           << " Clique Core value: " << results[i][4] << endl;
     }
   }
+
+  DensestCoreData densestCore;
+  locateDensestCore(results, densestCore);
 }

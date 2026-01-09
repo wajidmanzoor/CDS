@@ -33,5 +33,8 @@ public:
   CDS(Graph *graph, Motif *motif);
   void cliqueCoreDecompose(vector<vector<double>> &results);
   void cliqueEnumerationListRecord();
+  void locateDensestCore(vector<vector<double>> &coreResults,
+                         DensestCoreData &densestCore);
+
   void DSD();
 };
