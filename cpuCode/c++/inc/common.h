@@ -50,3 +50,9 @@ struct DensestCoreData {
   double density;
   int maxCliqueCore;
 };
+
+struct ConnectedComponentData {
+  vector<vector<ui>> graph;
+  vector<ui> reverseMap;
+  unordered_map<string, vector<int>> cliqueData;
+};

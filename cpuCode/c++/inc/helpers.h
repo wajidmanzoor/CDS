@@ -32,6 +32,8 @@ private:
                         vector<ui> &validNeighborCount,
                         unordered_map<string, vector<int>> &cliqueData,
                         vector<ui> cliqueDegree);
+  void CDS::BFS(vector<ui> status, int vertex, int index,
+                const vector<vector<ui>> &newGraph);
 
 public:
   CDS();
@@ -47,6 +49,10 @@ public:
   int pruneInvalidEdges(vector<vector<ui>> &oldGraph,
                         vector<vector<ui>> &newGraph,
                         unordered_map<string, vector<int>> &cliqueData);
+
+  void connectedComponentDecompose(vector<vector<ui>> &newGraph,
+
+                                   vector<ConnectedComponentData> &conComp);
 
   void DSD();
 };

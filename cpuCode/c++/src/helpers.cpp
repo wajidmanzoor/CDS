@@ -729,6 +729,39 @@ int pruneInvalidEdges(vector<vector<ui>> &oldGraph,
   return totalEdges / 2;
 }
 
+void CDS::BFS(vector<ui> status, int vertex, int index,
+              const vector<vector<ui>> &newGraph) {
+  queue<int> q;
+  q.push(vertex);
+  while (!q.empty()) {
+    int node = q.front();
+    q.pop();
+    status[node] = index;
+    for (int neigh : newGraph[node]) {
+      if (status[neigh] == 0) {
+        q.push(neigh);
+      }
+    }
+  }
+}
+void CDS::connectedComponentDecompose(
+    vector<vector<ui>> &newGraph, vector<ConnectedComponentData> &conComps) {
+
+  vector<ui> status;
+  status.resize(newGraph.size(), 0);
+  int index = 0;
+  for (ui i = 0; i < newGraph.size(); i++) {
+    if (status[i] == 0) {
+      index++;
+      BFS(status, i, index, newGraph);
+    }
+  }
+
+  if (index == 1) {
+
+  } else {
+  }
+}
 void CDS::DSD() {
   vector<vector<double>> results;
   cliqueCoreDecompose(results);
