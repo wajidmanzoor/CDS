@@ -60,3 +60,9 @@ struct ConnectedComponentData {
   long totalCliques;
   double density;
 };
+
+struct finalResult {
+  vector<ui> verticies;
+  double density;
+  ui size;
+};

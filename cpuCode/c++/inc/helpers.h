@@ -34,6 +34,21 @@ private:
                         vector<ui> cliqueDegree);
   void CDS::BFS(vector<ui> status, int vertex, int index,
                 const vector<vector<ui>> &newGraph);
+  void exact(vector<int> res, ConnectedComponentData &conComp,
+             DensestCoreData &densestCore, finalResult &densestSubgraph,
+             double upperBound, double lowerBound);
+  void
+  createFlownetwork(vector<unordered_map<int, array<double, 2>>> &flowNetwork,
+                    ConnectedComponentData &conComp, double aplha);
+  void
+  updateFlownetwork(vector<unordered_map<int, array<double, 2>>> &flowNetwork,
+                    ConnectedComponentData &conComp, double alpha);
+  double edmondsKarp(vector<unordered_map<int, array<double, 2>>> &flowNetwork,
+                     vector<int> &parent, ConnectedComponentData &conComp,
+                     double alpha);
+  double augmentPath(vector<unordered_map<int, array<double, 2>>> &flowNetwork,
+                     vector<int> &parent, ConnectedComponentData &conComp,
+                     double alpha);
 
 public:
   CDS();
@@ -53,8 +68,10 @@ public:
   void
   connectedComponentDecompose(vector<vector<ui>> &newGraph,
                               unordered_map<string, vector<int>> &cliqueData,
-
                               vector<ConnectedComponentData> &conCompList);
+  void dynamicExact(vector<ConnectedComponentData> &conCompList,
+                    DensestCoreData &densestCore, finalResult &densestSubgraph,
+                    bool ub1, bool ub2);
 
   void DSD();
 };

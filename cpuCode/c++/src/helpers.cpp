@@ -849,6 +849,242 @@ void CDS::connectedComponentDecompose(
     }
   }
 }
+
+void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
+                       DensestCoreData &densestCore,
+                       finalResult &densestSubgraph, bool ub1, bool ub2) {
+
+  ConnectedComponentData current, index;
+  double lowerBound = 0;
+  current = conCompList[0];
+  for (ui i = 0; i < conCompList.size(); i++) {
+
+    if (lowerBound < conCompList[i].density) {
+      lowerBound = current.density;
+      current = conCompList[i];
+    }
+  }
+  if (ceil(lowerBound) < ceil(densestCore.density)) {
+    lowerBound = densestCore.density;
+  }
+
+  double upperBound = densestCore.maxCliqueCore;
+
+  densestSubgraph.verticies.resize(current.size);
+
+  for (ui i = 0; i < current.graph.size(); i++) {
+    densestSubgraph.verticies[i] =
+        densestCore.reverseMap[current.reverseMap[i]];
+  }
+
+  // TODO: add new density bounds
+
+  for (ui i = 0; i < conCompList.size(); i++) {
+    current = conCompList[i];
+    vector<int> res;
+    exact(res, current, densestCore, densestSubgraph, upperBound, lowerBound);
+    long cliqueCount = 0;
+    ui vertexCount = 0;
+    for (const auto &entry : current.cliqueData) {
+      const vector<int> &temp = entry.second;
+      int i = 0;
+      for (; i < temp.size() - 1; i++) {
+        if (res[temp[i]] == -1) {
+          break;
+        }
+        if (i == temp.size() - 1) {
+          cliqueCount += temp[i];
+        }
+      }
+    }
+
+    for (ui i = 0; i < current.size; i++) {
+      if (res[i] != -1) {
+        vertexCount++;
+      }
+    }
+
+    if (vertexCount == 0) {
+      vertexCount = current.size;
+    }
+
+    double temp = (double)(cliqueCount / ((double)vertexCount));
+
+    if (temp > densestSubgraph.density) {
+      densestSubgraph.density = temp;
+      lowerBound = temp;
+      densestSubgraph.size = vertexCount;
+      densestSubgraph.verticies.clear();
+      densestSubgraph.verticies.resize(vertexCount);
+      // TODO: CHECK MAYBE WRong
+      for (ui i = 0; i < res.size(); i++) {
+        if (res[i] != -1) {
+          densestSubgraph.verticies[i] =
+              densestCore.reverseMap[current.reverseMap[i]];
+        }
+      }
+    }
+  }
+}
+
+void CDS::exact(vector<int> res, ConnectedComponentData &conComp,
+                DensestCoreData &densestCore, finalResult &densestSubgraph,
+                double upperBound, double lowerBound) {
+
+  double alpha = (upperBound + lowerBound) / 2;
+  double bais = 1.0 / (conComp.size * (conComp.size - 1));
+  if (bais < 0.000000000000001) {
+    bais = 0.000000000000001;
+  }
+
+  vector<unordered_map<int, array<double, 2>>> flowNetwork;
+  vector<int> parent;
+
+  createFlownetwork(flowNetwork, conComp, alpha);
+
+  res.clear();
+  res.resize(conComp.size, 1);
+  while ((upperBound - lowerBound) > bais) {
+    double currentDesnisty = edmondsKarp(flowNetwork, parent, conComp, alpha);
+
+    if (currentDesnisty == conComp.totalCliques * motif->size) {
+      upperBound = alpha;
+    } else {
+      lowerBound = alpha;
+      for (ui i = 0; i < conComp.size; i++) {
+        res[i] = parent[i];
+      }
+    }
+    alpha = (upperBound + lowerBound) / 2;
+    updateFlownetwork(flowNetwork, conComp, alpha);
+  }
+}
+
+void CDS::createFlownetwork(
+    vector<unordered_map<int, array<double, 2>>> &flowNetwork,
+    ConnectedComponentData &conComp, double alpha) {
+  int flowNetworkSize = conComp.size + conComp.totalCliques + 2;
+  int a = conComp.totalCliques;
+  flowNetwork.clear();
+  flowNetwork.resize(flowNetworkSize);
+  int i = 0;
+  double weight = 0.0;
+  i = conComp.size;
+  for (const auto &entry : conComp.cliqueData) {
+    const vector<int> &temp = entry.second;
+    weight = temp[motif->size] * (motif->size - 1);
+    for (ui x = 0; x < motif->size; x++) {
+      array<double, 2> temp1 = {static_cast<double>(temp[motif->size]),
+                                static_cast<double>(temp[motif->size])};
+      array<double, 2> temp2 = {weight, weight};
+
+      // add edge from motif to vertex
+      flowNetwork[i][temp[a]] = temp2;
+
+      // add edge from vertex to motif
+      flowNetwork[temp[a]][i] = temp1;
+    }
+    ++i;
+  }
+
+  int source = conComp.totalCliques + conComp.size;
+  int sink = source + 1;
+  for (i = 0; i < conComp.size; i++) {
+    array<double, 2> temp1 = {0.0, 0.0};
+    flowNetwork[i][source] = temp1;
+    array<double, 2> temp2 = {alpha * (motif->size), alpha * (motif->size)};
+    flowNetwork[i][sink] = temp2;
+    array<double, 2> temp3 = {static_cast<double>(conComp.cliqueDegree[i]),
+                              static_cast<double>(conComp.cliqueDegree[i])};
+    flowNetwork[source][i] = temp3;
+    array<double, 2> temp4 = {0.0, 0.0};
+    flowNetwork[sink][i] = temp4;
+  }
+}
+
+void CDS::updateFlownetwork(
+    vector<unordered_map<int, array<double, 2>>> &flowNetwork,
+    ConnectedComponentData &conComp, double alpha) {
+  int sink = conComp.size + conComp.totalCliques + 1;
+  // reset available capacity = max capacity for all edges
+  for (int i = 0; i <= sink; ++i) {
+    for (auto &entry : flowNetwork[i]) {
+      auto &temp_array = entry.second;
+      temp_array[0] = temp_array[1];
+    }
+  }
+
+  // update edges from graph vertices to sink
+  for (int i = 0; i < conComp.size; ++i) {
+    auto &temp_array = flowNetwork[i][sink];
+    temp_array[0] = alpha * motif->size;
+    temp_array[1] = alpha * motif->size;
+  }
+}
+
+double
+CDS::edmondsKarp(vector<unordered_map<int, array<double, 2>>> &flowNetwork,
+                 vector<int> &parent, ConnectedComponentData &conComp,
+                 double alpha) {
+  parent.clear();
+  parent.resize(flowNetwork.size());
+  double minCut = augmentPath(flowNetwork, parent, conComp, alpha);
+
+  double sum = 0;
+  vector<double> temp;
+  int sink = conComp.size + conComp.totalCliques + 1;
+  while (minCut != -1) {
+    int cur = sink;
+    while (cur != sink) {
+      flowNetwork[parent[cur]][cur][0] =
+          flowNetwork[parent[cur]][cur][0] - minCut;
+      flowNetwork[cur][parent[cur]][0] =
+          flowNetwork[cur][parent[cur]][0] + minCut;
+      cur = parent[cur];
+    }
+    sum += minCut;
+    minCut = augmentPath(flowNetwork, parent, conComp, alpha);
+  }
+  return sum;
+}
+
+double
+CDS::augmentPath(vector<unordered_map<int, array<double, 2>>> &flowNetwork,
+                 vector<int> &parent, ConnectedComponentData &conComp,
+                 double alpha) {
+  double maxflow = DINF;
+  fill(parent.begin(), parent.end(), -1);
+  int source = conComp.size + conComp.totalCliques;
+  int sink = source + 1;
+  queue<int> queue;
+  queue.push(source);
+  parent[source] = source;
+  while (!queue.empty()) {
+    int p = queue.front();
+    queue.pop();
+    if (p == sink) {
+      while (p != source) {
+        if (maxflow > flowNetwork[parent[p]][p][0]) {
+          maxflow = flowNetwork[parent[p]][p][0];
+        }
+        p = parent[p];
+      }
+      break;
+    }
+    for (auto entry : flowNetwork[p]) {
+      if (parent[entry.first] == -1 && entry.second[0] > 0) {
+        parent[entry.first] = p;
+        queue.push(entry.first);
+      }
+    }
+  }
+
+  if (parent[sink] == -1) {
+    return -1;
+  }
+  return maxflow;
+}
+
 void CDS::DSD() {
   vector<vector<double>> results;
   cliqueCoreDecompose(results);
