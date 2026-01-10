@@ -50,9 +50,11 @@ public:
                         vector<vector<ui>> &newGraph,
                         unordered_map<string, vector<int>> &cliqueData);
 
-  void connectedComponentDecompose(vector<vector<ui>> &newGraph,
+  void
+  connectedComponentDecompose(vector<vector<ui>> &newGraph,
+                              unordered_map<string, vector<int>> &cliqueData,
 
-                                   vector<ConnectedComponentData> &conComp);
+                              vector<ConnectedComponentData> &conCompList);
 
   void DSD();
 };

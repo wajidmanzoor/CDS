@@ -745,7 +745,9 @@ void CDS::BFS(vector<ui> status, int vertex, int index,
   }
 }
 void CDS::connectedComponentDecompose(
-    vector<vector<ui>> &newGraph, vector<ConnectedComponentData> &conComps) {
+    vector<vector<ui>> &newGraph,
+    unordered_map<string, vector<int>> &cliqueData,
+    vector<ConnectedComponentData> &conCompList) {
 
   vector<ui> status;
   status.resize(newGraph.size(), 0);
@@ -758,8 +760,93 @@ void CDS::connectedComponentDecompose(
   }
 
   if (index == 1) {
+    ConnectedComponentData conComp;
+    conComp.totalCliques = 0;
+    conComp.size = newGraph.size();
+    conComp.cliqueDegree.resize(conComp.size);
+    for (const auto &entry : cliqueData) {
+      const vector<int> &temp = entry.second;
+      for (ui i = 0; i < temp.size() - 1; i++) {
+        conComp.cliqueDegree[temp[i]] += temp[temp.size() - 1];
+      }
+      conComp.totalCliques = temp[temp.size() - 1];
+    }
+
+    conComp.graph = newGraph;
+    conComp.cliqueData = cliqueData;
+    conComp.density = (double)conComp.totalCliques / ((double)conComp.size);
+    conComp.reverseMap.resize(conComp.size);
+    iota(conComp.reverseMap.begin(), conComp.reverseMap.end(), 0);
+    conCompList.push_back(conComp);
 
   } else {
+    vector<unordered_map<string, vector<int>>> cliqueDataList;
+    cliqueDataList.resize(index + 1);
+    vector<ui> graphSizeList;
+    graphSizeList.resize(index + 1, 0);
+    vector<ui> oldToNew;
+    oldToNew.resize(newGraph.size(), 0);
+
+    for (ui i = 0; i < newGraph.size(); i++) {
+      oldToNew[i] = graphSizeList[status[i]];
+      graphSizeList[status[i]]++;
+    }
+
+    vector<vector<ui>> reverseMapList;
+    reverseMapList.resize(index + 1);
+
+    for (ui i = 1; i <= index; i++) {
+      reverseMapList.resize(graphSizeList[i]);
+    }
+
+    vector<ui> tempIndex;
+    tempIndex.resize(index + 1);
+    for (ui i = 0; i < newGraph.size(); i++) {
+      ui compId = status[i];
+      ui newVertexId = oldToNew[i];
+      reverseMapList[compId][newVertexId] = i;
+      tempIndex[compId]++;
+    }
+
+    for (auto &entry : cliqueData) {
+      int temp = entry.second[0];
+      auto &array = entry.second;
+      for (ui i = 0; i < array.size() - 1; i++) {
+        array[i] = oldToNew[array[i]];
+      }
+      cliqueDataList[status[temp]][entry.first] = entry.second;
+    }
+
+    vector<vector<vector<ui>>> graphList;
+    graphList.resize(index + 1);
+    for (ui i = 1; i < index + 1; i++) {
+      graphList.resize(graphSizeList[i]);
+    }
+
+    for (ui i = 0; i < newGraph.size(); i++) {
+      for (int j = 0; j < newGraph[i].size(); j++) {
+        graphList[status[i]][oldToNew[i]].push_back(oldToNew[newGraph[i][j]]);
+      }
+    }
+
+    for (ui i = 1; i < index + 1; i++) {
+      ConnectedComponentData conComp;
+      conComp.totalCliques = 0;
+      conComp.cliqueDegree.resize(graphSizeList[i], 0);
+      for (const auto &entry : cliqueDataList[i]) {
+        const vector<int> &temp = entry.second;
+        for (ui i = 0; i < temp.size() - 1; i++) {
+          conComp.cliqueDegree[temp[i]] += temp[temp.size() - 1];
+        }
+        conComp.totalCliques = temp[temp.size() - 1];
+      }
+      conComp.graph = graphList[i];
+      conComp.size = graphSizeList[i];
+      conComp.cliqueData = cliqueDataList[i];
+      conComp.density = (double)conComp.totalCliques / ((double)conComp.size);
+      conComp.reverseMap = reverseMapList[i];
+      conCompList.push_back(conComp);
+    }
   }
 }
 void CDS::DSD() {
@@ -785,4 +872,7 @@ void CDS::DSD() {
 
   int validEdgeCount =
       pruneInvalidEdges(densestCore.graph, newGraph, cliqueData);
+
+  vector<ConnectedComponentData> conCompList;
+  connectedComponentDecompose(newGraph, cliqueData, conCompList);
 }
