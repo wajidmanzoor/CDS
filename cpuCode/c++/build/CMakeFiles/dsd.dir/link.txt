@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/dsd.dir/main.cpp.o CMakeFiles/dsd.dir/src/graph.cpp.o CMakeFiles/dsd.dir/src/common.cpp.o CMakeFiles/dsd.dir/src/helpers.cpp.o -o dsd

@@ -1,4 +1,3 @@
-#pragma once
 #include "inc/common.h"
 #include "inc/graph.h"
 #include "inc/helpers.h"

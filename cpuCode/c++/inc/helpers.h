@@ -22,18 +22,18 @@ private:
   void cliqueEnumerationSubgraph(vector<vector<ui>> &subGraph,
                                  vector<ui> &subGraphCliqueDegree, ui motifSize,
                                  ui vertex);
-  void CDS::listCliqueContainsVertex(ui k, vector<ui> &partialClique,
-                                     vector<ui> &candidates, vector<ui> &label,
-                                     vector<vector<ui>> &DAG,
-                                     vector<ui> &validNeighborCount,
-                                     vector<ui> &cliqueDegree, ui vertex);
+  void listCliqueContainsVertex(ui k, vector<ui> &partialClique,
+                                vector<ui> &candidates, vector<ui> &label,
+                                vector<vector<ui>> &DAG,
+                                vector<ui> &validNeighborCount,
+                                vector<ui> &cliqueDegree, ui vertex);
   void listCliqueRecord(ui k, vector<ui> &partialClique, vector<ui> &candidates,
                         vector<ui> &label, vector<vector<ui>> &DAG,
                         vector<ui> &validNeighborCount,
                         unordered_map<string, vector<int>> &cliqueData,
                         vector<ui> cliqueDegree);
-  void CDS::BFS(vector<ui> status, int vertex, int index,
-                const vector<vector<ui>> &newGraph);
+  void BFS(vector<ui> status, int vertex, int index,
+           const vector<vector<ui>> &newGraph);
   void exact(vector<int> res, ConnectedComponentData &conComp,
              DensestCoreData &densestCore, finalResult &densestSubgraph,
              double upperBound, double lowerBound);

@@ -1,4 +1,3 @@
-#pragma once
 #include "../inc/helpers.h"
 #include "../inc/graph.h"
 #include <map>
@@ -695,9 +694,9 @@ void CDS::listCliqueRecord(ui k, vector<ui> &partialClique,
   }
 }
 
-int pruneInvalidEdges(vector<vector<ui>> &oldGraph,
-                      vector<vector<ui>> &newGraph,
-                      unordered_map<string, vector<int>> &cliqueData) {
+int CDS::pruneInvalidEdges(vector<vector<ui>> &oldGraph,
+                           vector<vector<ui>> &newGraph,
+                           unordered_map<string, vector<int>> &cliqueData) {
   int count = 0;
   vector<unordered_map<int, int>> validEdges(oldGraph.size());
 
@@ -881,6 +880,33 @@ void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
 
   for (ui i = 0; i < conCompList.size(); i++) {
     current = conCompList[i];
+
+    if (ub1) {
+      double k = (double)motif->size;
+      double log_fact = 0.0;
+      for (ui i = 1; i <= motif->size; ++i)
+        log_fact += log((double)i);
+
+      double dem = exp(log_fact / k);
+      double num = pow((double)current.totalCliques, (k - 1.0) / k);
+
+      double upperBound1 = num / dem;
+      if (upperBound1 < upperBound) {
+        upperBound = upperBound1;
+      }
+    }
+    if (ub2) {
+      double dem = (double)(motif->size * current.totalCliques);
+      double upperBound2 = 0.0;
+      for (ui deg = 0; deg < current.cliqueDegree.size(); deg++) {
+        double pv = (double)current.cliqueDegree[deg] / dem;
+        pv = pv * pv;
+        upperBound2 += pv;
+      }
+      if (upperBound2 < upperBound) {
+        upperBound = upperBound2;
+      }
+    }
     vector<int> res;
     exact(res, current, densestCore, densestSubgraph, upperBound, lowerBound);
     long cliqueCount = 0;
@@ -1111,4 +1137,10 @@ void CDS::DSD() {
 
   vector<ConnectedComponentData> conCompList;
   connectedComponentDecompose(newGraph, cliqueData, conCompList);
+  finalResult densestSubgraph;
+  dynamicExact(conCompList, densestCore, densestSubgraph, false, false);
+  cout << "Results" << endl;
+  cout << "K: " << motif->size << endl;
+  cout << "Density: " << densestSubgraph.density << endl;
+  cout << "Size: " << densestSubgraph.size << endl;
 }
