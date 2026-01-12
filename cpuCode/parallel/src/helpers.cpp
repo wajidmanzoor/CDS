@@ -25,6 +25,7 @@ void CDS ::cliqueCoreDecompose(vector<vector<double>> &results) {
   cliqueEnumerationFast();
 
   unordered_map<int, long> twoDNeighborhood;
+#pragma omp parallel for schedule(static)
   for (ui i = 0; i < graph->n; i++) {
     graph->cliqueCore[i] = graph->cliqueDegree[i];
   }
@@ -32,10 +33,11 @@ void CDS ::cliqueCoreDecompose(vector<vector<double>> &results) {
   int totalCliques = 0;
 
   graph->maxCliqueDegree = 0;
+#pragma omp parallel for reduction(+ : totalCliques)                           \
+    reduction(max : graph->maxCliqueDegree)
   for (ui i = 0; i < graph->n; i++) {
-    if (graph->cliqueDegree[i] > graph->maxCliqueDegree) {
-      graph->maxCliqueDegree = graph->cliqueDegree[i];
-    }
+    graph->maxCliqueDegree =
+        max(graph->maxCliqueDegree, graph->cliqueDegree[i]);
     totalCliques += graph->cliqueDegree[i];
   }
 
@@ -50,8 +52,24 @@ void CDS ::cliqueCoreDecompose(vector<vector<double>> &results) {
   vector<long> bins;
   bins.resize(graph->maxCliqueDegree + 1, 0);
 
-  for (ui i = 0; i < graph->n; i++) {
-    bins[graph->cliqueDegree[i]]++;
+  int maxD = graph->maxCliqueDegree;
+  int T = omp_get_max_threads();
+
+  vector<vector<long>> localBins(T, vector<long>(maxD + 1, 0));
+
+#pragma omp parallel
+  {
+    int tid = omp_get_thread_num();
+#pragma omp for
+    for (ui i = 0; i < graph->n; i++) {
+      localBins[tid][graph->cliqueDegree[i]]++;
+    }
+  }
+
+  for (int t = 0; t < T; t++) {
+    for (int d = 0; d <= maxD; d++) {
+      bins[d] += localBins[t][d];
+    }
   }
 
   // cumulative prefix sum of bins
@@ -82,12 +100,28 @@ void CDS ::cliqueCoreDecompose(vector<vector<double>> &results) {
   int count = 0;
 
   for (ui i = 0; i < graph->n; i++) {
-    int index = 0;
-    long indexMin = 0xFFFFFF;
-    for (ui j = 0; j < graph->n; j++) {
-      if (indexMin > graph->cliqueDegree[j] && mark[j] == 0) {
-        indexMin = graph->cliqueDegree[j];
-        index = j;
+    int index = -1;
+    long indexMin = LONG_MAX;
+
+#pragma omp parallel
+    {
+      int localIndex = -1;
+      long localMin = LONG_MAX;
+
+#pragma omp for nowait
+      for (ui j = 0; j < graph->n; j++) {
+        if (!mark[j] && graph->cliqueDegree[j] < localMin) {
+          localMin = graph->cliqueDegree[j];
+          localIndex = j;
+        }
+      }
+
+#pragma omp critical
+      {
+        if (localMin < indexMin) {
+          indexMin = localMin;
+          index = localIndex;
+        }
       }
     }
     if (debug) {
@@ -133,8 +167,8 @@ void CDS ::cliqueCoreDecompose(vector<vector<double>> &results) {
 }
 
 void CDS::get2Dneighborhood(unordered_map<int, long> &subgraphResults,
-                            int index, vector<int> mark, vector<int> array,
-                            vector<int> map_s) {
+                            int index, vector<int> &mark, vector<int> &array,
+                            vector<int> &map_s) {
   subgraphResults.clear();
   vector<int> tempList;
   tempList.push_back(index);
@@ -146,12 +180,18 @@ void CDS::get2Dneighborhood(unordered_map<int, long> &subgraphResults,
     int current = q.front();
     q.pop();
     d = array[current];
+#pragma omp parallel for
     for (ui i = 0; i < graph->adjacencyList[current].size(); i++) {
       int neighbor = graph->adjacencyList[current][i];
-      if (mark[neighbor] == 0 && array[neighbor] == 0 && (d + 1 <= 2)) {
-        array[neighbor] = d + 1;
-        tempList.push_back(neighbor);
-        q.push(neighbor);
+      if (mark[neighbor] == 0 && array[neighbor] == 0) {
+#pragma omp critical
+        {
+          if (array[neighbor] == 0) {
+            array[neighbor] = d + 1;
+            tempList.push_back(neighbor);
+            q.push(neighbor);
+          }
+        }
       }
     }
   }
@@ -305,20 +345,19 @@ void CDS::generateDAG(const vector<vector<ui>> adjList, vector<vector<ui>> &DAG,
                       vector<ui> &order) {
   int count;
   DAG.resize(adjList.size());
+#pragma omp parallel for schedule(dynamic)
   for (ui i = 0; i < adjList.size(); i++) {
-    count = 0;
+    int count = 0;
     for (ui j = 0; j < adjList[i].size(); j++) {
-      if (order[adjList[i][j]] > order[i]) {
+      if (order[adjList[i][j]] > order[i])
         count++;
-      }
     }
-    DAG[i].resize(count, 0);
-    int index = 0;
+    DAG[i].resize(count);
+
+    int idx = 0;
     for (ui j = 0; j < adjList[i].size(); j++) {
-      if (order[adjList[i][j]] > order[i]) {
-        DAG[i][index] = adjList[i][j];
-        index++;
-      }
+      if (order[adjList[i][j]] > order[i])
+        DAG[i][idx++] = adjList[i][j];
     }
   }
 }
@@ -507,20 +546,30 @@ void CDS::locateDensestCore(vector<vector<double>> &coreResults,
                             DensestCoreData &densestCore) {
   graph->maxCliquecore = 0;
   double max = coreResults[0][2];
+
+  // Parallelize max finding
+  double localMax = coreResults[0][2];
+  int localMaxCliqueCore = 0;
+
+#pragma omp parallel for reduction(max : localMax, localMaxCliqueCore)
   for (ui i = 1; i < graph->n; i++) {
-    if (max < coreResults[i][2]) {
-      max = coreResults[i][2];
+    if (localMax < coreResults[i][2]) {
+      localMax = coreResults[i][2];
     }
-    if (graph->maxCliquecore < coreResults[i][1]) {
-      graph->maxCliquecore = coreResults[i][1];
+    if (localMaxCliqueCore < coreResults[i][1]) {
+      localMaxCliqueCore = coreResults[i][1];
     }
   }
 
-  int lowerBound = (int)ceil(max);
+  max = localMax;
+  graph->maxCliquecore = localMaxCliqueCore;
 
+  int lowerBound = (int)ceil(max);
   int index = 1;
   vector<int> deletedVertices;
   deletedVertices.resize(graph->n, 0);
+
+  // This loop is sequential due to dependency on index
   for (; index < graph->n; index++) {
     if (coreResults[index][1] >= lowerBound) {
       deletedVertices.push_back(coreResults[index][0]);
@@ -530,6 +579,7 @@ void CDS::locateDensestCore(vector<vector<double>> &coreResults,
   }
 
   int temp = 0;
+  // This loop has dependencies, cannot parallelize easily
   for (ui i = 0; i < graph->n; i++) {
     if (deletedVertices[i] == 0) {
       deletedVertices[i] = temp;
@@ -539,27 +589,30 @@ void CDS::locateDensestCore(vector<vector<double>> &coreResults,
 
   vector<vector<double>> newCoreResults;
   newCoreResults.resize(temp, vector<double>(2));
-
   densestCore.graph.resize(temp);
-
   ui newGraphSize = temp;
 
   temp = 0;
+  // Sequential due to temp counter
   for (ui i = index; i < graph->n; i++) {
     int m = (int)coreResults[i][0];
     newCoreResults[temp][0] = deletedVertices[m];
-
     newCoreResults[temp][1] = coreResults[i][1];
     temp++;
   }
 
+  // Parallelize graph construction
+#pragma omp parallel for schedule(dynamic)
   for (ui i = 0; i < graph->n; i++) {
     if (deletedVertices[i] != -1) {
       for (ui j = 0; j < graph->adjacencyList[i].size(); j++) {
         int neighbor = graph->adjacencyList[i][j];
         if (deletedVertices[neighbor] != -1) {
-          densestCore.graph[deletedVertices[i]].push_back(
-              deletedVertices[neighbor]);
+#pragma omp critical
+          {
+            densestCore.graph[deletedVertices[i]].push_back(
+                deletedVertices[neighbor]);
+          }
         }
       }
     }
@@ -567,11 +620,14 @@ void CDS::locateDensestCore(vector<vector<double>> &coreResults,
 
   densestCore.reverseMap.resize(newGraphSize, 0);
 
+  // Parallelize reverse map construction
+#pragma omp parallel for
   for (ui i = 0; i < deletedVertices.size(); i++) {
     if (deletedVertices[i] != -1) {
       densestCore.reverseMap[deletedVertices[i]] = i;
     }
   }
+
   densestCore.lowerBound = lowerBound;
   densestCore.delVertexIndex = index - 1;
   densestCore.delCliqueCount =
@@ -579,7 +635,6 @@ void CDS::locateDensestCore(vector<vector<double>> &coreResults,
   densestCore.density = coreResults[index - 1][2];
   densestCore.maxCliqueCore = graph->maxCliquecore;
 }
-
 void CDS::cliqueEnumerationListRecord(
     vector<vector<ui>> newGraph, unordered_map<string, vector<int>> &cliqueData,
     vector<ui> &cliqueDegree, ui motifSize) {
@@ -697,9 +752,10 @@ void CDS::listCliqueRecord(ui k, vector<ui> &partialClique,
 int CDS::pruneInvalidEdges(vector<vector<ui>> &oldGraph,
                            vector<vector<ui>> &newGraph,
                            unordered_map<string, vector<int>> &cliqueData) {
-  int count = 0;
+
   vector<unordered_map<int, int>> validEdges(oldGraph.size());
 
+  // Build valid edges set from clique data
   for (const auto &entry : cliqueData) {
     const vector<int> &temp = entry.second;
     for (ui i = 0; i < temp.size() - 1; i++) {
@@ -714,10 +770,11 @@ int CDS::pruneInvalidEdges(vector<vector<ui>> &oldGraph,
   }
 
   newGraph.resize(oldGraph.size());
-
   int totalEdges = 0;
 
-  for (ui i = 0; i < newGraph.size(); i++) {
+  // Parallelize edge filtering - each vertex processed independently
+#pragma omp parallel for reduction(+ : totalEdges) schedule(dynamic)
+  for (ui i = 0; i < oldGraph.size(); i++) {
     for (ui j = 0; j < oldGraph[i].size(); j++) {
       if (validEdges[i].find(oldGraph[i][j]) != validEdges[i].end()) {
         newGraph[i].push_back(oldGraph[i][j]);
@@ -725,9 +782,9 @@ int CDS::pruneInvalidEdges(vector<vector<ui>> &oldGraph,
       }
     }
   }
+
   return totalEdges / 2;
 }
-
 void CDS::BFS(vector<ui> status, int vertex, int index,
               const vector<vector<ui>> &newGraph) {
   queue<int> q;
@@ -828,23 +885,29 @@ void CDS::connectedComponentDecompose(
       }
     }
 
-    for (ui i = 1; i < index + 1; i++) {
+    conCompList.resize(index);
+#pragma omp parallel for schedule(dynamic)
+    for (ui i = 1; i <= index; i++) {
       ConnectedComponentData conComp;
       conComp.totalCliques = 0;
       conComp.cliqueDegree.resize(graphSizeList[i], 0);
+
       for (const auto &entry : cliqueDataList[i]) {
         const vector<int> &temp = entry.second;
-        for (ui i = 0; i < temp.size() - 1; i++) {
-          conComp.cliqueDegree[temp[i]] += temp[temp.size() - 1];
+        for (ui j = 0; j < temp.size() - 1; j++) {
+          conComp.cliqueDegree[temp[j]] += temp[temp.size() - 1];
         }
         conComp.totalCliques = temp[temp.size() - 1];
       }
+
       conComp.graph = graphList[i];
       conComp.size = graphSizeList[i];
       conComp.cliqueData = cliqueDataList[i];
-      conComp.density = (double)conComp.totalCliques / ((double)conComp.size);
+      conComp.density = (double)conComp.totalCliques / (double)conComp.size;
       conComp.reverseMap = reverseMapList[i];
-      conCompList.push_back(conComp);
+
+      // SAFE: unique index per thread
+      conCompList[i - 1] = std::move(conComp);
     }
   }
 }
@@ -853,106 +916,156 @@ void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
                        DensestCoreData &densestCore,
                        finalResult &densestSubgraph, bool ub1, bool ub2) {
 
-  ConnectedComponentData current, index;
-  double lowerBound = 0;
-  current = conCompList[0];
-  for (ui i = 0; i < conCompList.size(); i++) {
-
-    if (lowerBound < conCompList[i].density) {
-      lowerBound = current.density;
-      current = conCompList[i];
-    }
-  }
-  if (ceil(lowerBound) < ceil(densestCore.density)) {
-    lowerBound = densestCore.density;
-  }
-
-  double upperBound = densestCore.maxCliqueCore;
-
-  densestSubgraph.verticies.resize(current.size);
-
-  for (ui i = 0; i < current.graph.size(); i++) {
-    densestSubgraph.verticies[i] =
-        densestCore.reverseMap[current.reverseMap[i]];
-  }
-
-  // TODO: add new density bounds
+  // ---- Initial lower bound from components ----
+  double globalLowerBound = 0.0;
+  ConnectedComponentData baseComp = conCompList[0];
 
   for (ui i = 0; i < conCompList.size(); i++) {
-    current = conCompList[i];
-
-    if (ub1) {
-      double k = (double)motif->size;
-      double log_fact = 0.0;
-      for (ui i = 1; i <= motif->size; ++i)
-        log_fact += log((double)i);
-
-      double dem = exp(log_fact / k);
-      double num = pow((double)current.totalCliques, (k - 1.0) / k);
-
-      double upperBound1 = num / dem;
-      if (upperBound1 < upperBound) {
-        upperBound = upperBound1;
-      }
+    if (conCompList[i].density > globalLowerBound) {
+      globalLowerBound = conCompList[i].density;
+      baseComp = conCompList[i];
     }
-    if (ub2) {
-      double dem = (double)(motif->size * current.totalCliques);
-      double upperBound2 = 0.0;
-      for (ui deg = 0; deg < current.cliqueDegree.size(); deg++) {
-        double pv = (double)current.cliqueDegree[deg] / dem;
-        pv = pv * pv;
-        upperBound2 += pv;
+  }
+
+  if (ceil(globalLowerBound) < ceil(densestCore.density)) {
+    globalLowerBound = densestCore.density;
+  }
+
+  double globalUpperBound = densestCore.maxCliqueCore;
+
+  // ---- Initialize global best result ----
+  finalResult bestGlobal;
+  bestGlobal.density = densestSubgraph.density;
+  bestGlobal.size = densestSubgraph.size;
+  bestGlobal.verticies = densestSubgraph.verticies;
+
+  // ---- Shared variable for dynamic lower bound updates ----
+  double sharedLowerBound = globalLowerBound;
+  omp_lock_t lowerBoundLock;
+  omp_init_lock(&lowerBoundLock);
+
+  // ---- Parallel region ----
+#pragma omp parallel
+  {
+    finalResult localBest;
+    localBest.density = -1.0;
+
+#pragma omp for schedule(dynamic)
+    for (ui idx = 0; idx < conCompList.size(); idx++) {
+
+      ConnectedComponentData current = conCompList[idx];
+
+      // Read the current shared lower bound
+      double lowerBound;
+      omp_set_lock(&lowerBoundLock);
+      lowerBound = sharedLowerBound;
+      omp_unset_lock(&lowerBoundLock);
+
+      double upperBound = globalUpperBound;
+
+      // ---------- UB1 ----------
+      if (ub1) {
+        double k = (double)motif->size;
+        double log_fact = 0.0;
+        for (ui j = 1; j <= motif->size; ++j)
+          log_fact += log((double)j);
+
+        double dem = exp(log_fact / k);
+        double num = pow((double)current.totalCliques, (k - 1.0) / k);
+
+        upperBound = min(upperBound, num / dem);
       }
-      if (upperBound2 < upperBound) {
-        upperBound = upperBound2;
-      }
-    }
-    vector<int> res;
-    exact(res, current, densestCore, densestSubgraph, upperBound, lowerBound);
-    long cliqueCount = 0;
-    ui vertexCount = 0;
-    for (const auto &entry : current.cliqueData) {
-      const vector<int> &temp = entry.second;
-      int i = 0;
-      for (; i < temp.size() - 1; i++) {
-        if (res[temp[i]] == -1) {
-          break;
+
+      // ---------- UB2 ----------
+      if (ub2) {
+        double dem = (double)(motif->size * current.totalCliques);
+        double ub2val = 0.0;
+
+        for (ui deg = 0; deg < current.cliqueDegree.size(); deg++) {
+          double pv = (double)current.cliqueDegree[deg] / dem;
+          ub2val += pv * pv;
         }
-        if (i == temp.size() - 1) {
-          cliqueCount += temp[i];
+        upperBound = min(upperBound, ub2val);
+      }
+
+      // ---------- Early pruning based on upper bound ----------
+      // If the upper bound is less than or equal to current lower bound,
+      // this component cannot improve the solution
+      if (upperBound <= lowerBound) {
+        continue; // Skip this component
+      }
+
+      // ---------- Exact solver ----------
+      vector<int> res;
+      exact(res, current, densestCore, densestSubgraph, upperBound, lowerBound);
+
+      // ---------- Compute density ----------
+      long cliqueCount = 0;
+      ui vertexCount = 0;
+
+      for (const auto &entry : current.cliqueData) {
+        const vector<int> &temp = entry.second;
+        bool valid = true;
+
+        for (ui j = 0; j < temp.size() - 1; j++) {
+          if (res[temp[j]] == -1) {
+            valid = false;
+            break;
+          }
         }
+
+        if (valid)
+          cliqueCount += temp.back();
+      }
+
+      for (ui j = 0; j < current.size; j++) {
+        if (res[j] != -1)
+          vertexCount++;
+      }
+
+      if (vertexCount == 0)
+        vertexCount = current.size;
+
+      double density = (double)cliqueCount / (double)vertexCount;
+
+      // ---------- Update local best ----------
+      if (density > localBest.density) {
+        localBest.density = density;
+        localBest.size = vertexCount;
+        localBest.verticies.clear();
+
+        for (ui j = 0; j < res.size(); j++) {
+          if (res[j] != -1) {
+            localBest.verticies.push_back(
+                densestCore.reverseMap[current.reverseMap[j]]);
+          }
+        }
+
+        // ---------- Update shared lower bound if we found a better solution
+        // ----------
+        omp_set_lock(&lowerBoundLock);
+        if (density > sharedLowerBound) {
+          sharedLowerBound = density;
+        }
+        omp_unset_lock(&lowerBoundLock);
       }
     }
 
-    for (ui i = 0; i < current.size; i++) {
-      if (res[i] != -1) {
-        vertexCount++;
-      }
-    }
-
-    if (vertexCount == 0) {
-      vertexCount = current.size;
-    }
-
-    double temp = (double)(cliqueCount / ((double)vertexCount));
-
-    if (temp > densestSubgraph.density) {
-      densestSubgraph.density = temp;
-      lowerBound = temp;
-      densestSubgraph.size = vertexCount;
-      densestSubgraph.verticies.clear();
-      densestSubgraph.verticies.resize(vertexCount);
-      // TODO: CHECK MAYBE WRong
-      for (ui i = 0; i < res.size(); i++) {
-        if (res[i] != -1) {
-          densestSubgraph.verticies[i] =
-              densestCore.reverseMap[current.reverseMap[i]];
-        }
+    // ---------- Reduce into global best ----------
+#pragma omp critical
+    {
+      if (localBest.density > bestGlobal.density) {
+        bestGlobal = localBest;
       }
     }
   }
+
+  // Clean up the lock
+  omp_destroy_lock(&lowerBoundLock);
+
+  // ---- Final result ----
+  densestSubgraph = bestGlobal;
 }
-
 void CDS::exact(vector<int> res, ConnectedComponentData &conComp,
                 DensestCoreData &densestCore, finalResult &densestSubgraph,
                 double upperBound, double lowerBound) {
@@ -1059,9 +1172,10 @@ CDS::edmondsKarp(vector<unordered_map<int, array<double, 2>>> &flowNetwork,
   double sum = 0;
   vector<double> temp;
   int sink = conComp.size + conComp.totalCliques + 1;
+  int source = sink - 1;
   while (minCut != -1) {
     int cur = sink;
-    while (cur != sink) {
+    while (cur != source) {
       flowNetwork[parent[cur]][cur][0] =
           flowNetwork[parent[cur]][cur][0] - minCut;
       flowNetwork[cur][parent[cur]][0] =
