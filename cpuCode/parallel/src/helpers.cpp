@@ -1,5 +1,4 @@
 #include "../inc/helpers.h"
-#include "../inc/graph.h"
 #include <map>
 #include <numeric>
 #include <sstream>
@@ -31,15 +30,18 @@ void CDS ::cliqueCoreDecompose(vector<vector<double>> &results) {
   }
 
   int totalCliques = 0;
+  int maxCliqueDegreeLocal = 0;
 
-  graph->maxCliqueDegree = 0;
 #pragma omp parallel for reduction(+ : totalCliques)                           \
-    reduction(max : graph->maxCliqueDegree)
+    reduction(max : maxCliqueDegreeLocal)
   for (ui i = 0; i < graph->n; i++) {
-    graph->maxCliqueDegree =
-        max(graph->maxCliqueDegree, graph->cliqueDegree[i]);
+    maxCliqueDegreeLocal =
+        std::max(maxCliqueDegreeLocal, (int)graph->cliqueDegree[i]);
     totalCliques += graph->cliqueDegree[i];
   }
+
+  // write back once (sequential, safe)
+  graph->maxCliqueDegree = maxCliqueDegreeLocal;
 
   totalCliques = totalCliques / static_cast<double>(motif->size);
 
@@ -180,18 +182,12 @@ void CDS::get2Dneighborhood(unordered_map<int, long> &subgraphResults,
     int current = q.front();
     q.pop();
     d = array[current];
-#pragma omp parallel for
     for (ui i = 0; i < graph->adjacencyList[current].size(); i++) {
       int neighbor = graph->adjacencyList[current][i];
-      if (mark[neighbor] == 0 && array[neighbor] == 0) {
-#pragma omp critical
-        {
-          if (array[neighbor] == 0) {
-            array[neighbor] = d + 1;
-            tempList.push_back(neighbor);
-            q.push(neighbor);
-          }
-        }
+      if (mark[neighbor] == 0 && array[neighbor] == 0 && (d + 1 <= 2)) {
+        array[neighbor] = d + 1;
+        tempList.push_back(neighbor);
+        q.push(neighbor);
       }
     }
   }

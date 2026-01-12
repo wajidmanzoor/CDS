@@ -133,8 +133,8 @@ void CDS ::cliqueCoreDecompose(vector<vector<double>> &results) {
 }
 
 void CDS::get2Dneighborhood(unordered_map<int, long> &subgraphResults,
-                            int index, vector<int> mark, vector<int> array,
-                            vector<int> map_s) {
+                            int index, vector<int> &mark, vector<int> &array,
+                            vector<int> &map_s) {
   subgraphResults.clear();
   vector<int> tempList;
   tempList.push_back(index);

@@ -7,8 +7,8 @@ private:
   Graph *graph;
   Motif *motif;
   void get2Dneighborhood(unordered_map<int, long> &subgraphResults, int index,
-                         vector<int> mark, vector<int> array,
-                         vector<int> map_s);
+                         vector<int> &mark, vector<int> &array,
+                         vector<int> &map_s);
   void cliqueEnumerationFast();
   void getlistingOrder(vector<ui> &order);
   void generateDAG(const vector<vector<ui>> adjList, vector<vector<ui>> &DAG,
