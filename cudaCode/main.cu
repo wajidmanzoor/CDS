@@ -19,6 +19,37 @@
 
 bool DEBUG = false;
 
+void globalRelabelCPU(hostFlowNetwork &flownetwork, ui flownetworkSize) {
+
+  ui sink = flownetworkSize - 1;
+  ui source = sink - 1;
+
+  for (ui i = 0; i < flownetworkSize; i++) {
+    flownetwork.height[i] = UINT_MAX;
+  }
+
+  Queue<ui> queue;
+  flownetwork.height[sink] = 0;
+  queue.push(sink);
+
+  while (!queue.empty()) {
+    ui vertex = queue.front();
+    queue.pop();
+    for (ui i = flowNetwork.offset[vertex]; i < flownetwork.offset[vertex + 1];
+         i++) {
+      ui neigh = flownetwork.neighbors[i];
+      ui revIndex = flowNetwork.flowIndex[i];
+      if ((flowNetwork.height[neigh] == UINT_MAX) &&
+          flownetwork.flow[revIndex] > 1e-3) {
+        flownetwork.height[neigh] = flownetwork.height[vertex] + 1;
+        queue.push(neigh);
+      }
+    }
+  }
+
+  flownetwork.height[source] = flownetworkSize;
+}
+
 void generateDAG(const Graph &graph, deviceGraphPointers &deviceGraph,
                  deviceDAGpointer &deviceDAG, vector<ui> listingOrder) {
 
@@ -610,9 +641,10 @@ double dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
                max_lowerBound);
 
   int iter = 0;
-  ui *gpuConverged, *capLeft;
+  ui *gpuConverged;
+  // ui *capLeft;
   chkerr(cudaMalloc((void **)&gpuConverged, sizeof(ui)));
-  chkerr(cudaMalloc((void **)&capLeft, sizeof(ui)));
+  // chkerr(cudaMalloc((void **)&capLeft, sizeof(ui)));
 
   double *minSupport, *componentCliques;
   double CPUminSupport = 0.0;
@@ -633,7 +665,7 @@ double dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
   double DSD_density = static_cast<double>(max_lowerBound);
 
   // cout << " start Density " << DSD_density << endl;
-  ui cpuCapLeft;
+  // ui cpuCapLeft;
 
   while (iter < totalComponents) {
 
@@ -665,6 +697,7 @@ double dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
       total = end - start;
       // cout << "Component Size " << total << endl;
       memoryAllocationFlowNetwork(flowNetwork, vertexSize, neighborSize);
+      allocateHostFlowNetwork(cpuFlownetwork, vertexSize, neighborSize);
 
       thrust::fill(thrust::device_pointer_cast(flowNetwork.offset + 1),
                    thrust::device_pointer_cast(flowNetwork.offset + total + 1),
@@ -736,8 +769,10 @@ double dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
                                        &totalExcess, &activeNodes, &iter,
                                        &solved};
 
-      void *globalRelabelKernelArgs[] = {&flowNetwork, &conComp, &compCounter,
-                                         &k,           &iter,    &capLeft};
+      /*void *globalRelabelKernelArgs[] = {&flowNetwork, &conComp,
+      &compCounter,
+      &k, &iter, &capLeft
+    };*/
 
       void *updateFlownetworkKernelArgs[] = {
           &flowNetwork,     &conComp,    &finalCliqueData, &compCounter,
@@ -815,7 +850,13 @@ double dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
           if (cpuSolved) {
             break;
           }
-          cpuCapLeft = 1;
+          copyDeviceToHostFlowNetwork(cpuFlownetwork, flowNetwork, vertexSize,
+                                      neighborSize);
+          globalRelabelCPU(cpuFlownetwork, vertexSize);
+          copyHostToDeviceFlowNetwork(flowNetwork, cpuFlownetwork, vertexSize,
+                                      neighborSize);
+
+          /*cpuCapLeft = 1;
           chkerr(cudaMemcpy(capLeft, &cpuCapLeft, sizeof(ui),
                             cudaMemcpyHostToDevice));
           cudaLaunchCooperativeKernel((void *)globalRelabel, num_blocks,
@@ -828,7 +869,7 @@ double dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
                             cudaMemcpyDeviceToHost));
           if (cpuCapLeft) {
             break;
-          }
+          }*/
 
           // break;
         }
@@ -854,6 +895,7 @@ double dynamicExactAlgo(const Graph &graph, deviceGraphPointers &deviceGraph,
 
       cudaFree(totalExcess);
       freeFlownetwork(flowNetwork);
+      freeHostFlowNetwork(cpuFlownetwork);
     }
     iter++;
   }

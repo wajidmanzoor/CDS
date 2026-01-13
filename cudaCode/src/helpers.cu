@@ -34,7 +34,7 @@ scan_active_vertices(int totalFlow, ui total, ui source, ui sink,
 
   /* Stride scan the V set */
   for (int u = idx; u < totalFlow; u += blockDim.x * gridDim.x) {
-    if (flowNetwork.excess[u] > 1e-6 && flowNetwork.height[u] < 2 * total &&
+    if (flowNetwork.excess[u] > 1e-3 && flowNetwork.height[u] < 2 * total &&
         u != source && u != sink) {
       activeNodes[atomicAdd(&globalCounter, 1)] = u;
     }
@@ -66,7 +66,7 @@ tiled_search_neighbor(cg::thread_block_tile<tileSize> tile, int pos,
     if (i * tileSize + idx < degree) {
       v_pos = flowNetwork.offset[u] + i * tileSize + idx;
       v = flowNetwork.neighbors[v_pos];
-      if ((flowNetwork.flow[v_pos] > 1e-6) && (v != source)) {
+      if ((flowNetwork.flow[v_pos] > 1e-3) && (v != source)) {
         sheight[threadIdx.x] = flowNetwork.height[v];
         svid[threadIdx.x] = v;
         svidx[threadIdx.x] = v_pos;
@@ -1356,7 +1356,7 @@ __global__ void preFlow(deviceFlowNetworkPointers flowNetwork,
 
   for (ui i = idx; i < total; i += TOTAL_THREAD) {
     ui neigh = flowNetwork.neighbors[nStart + i];
-    if (flowNetwork.capacity[nStart + i] > 1e-6) {
+    if (flowNetwork.capacity[nStart + i] > 1e-3) {
       flowNetwork.flow[nStart + i] = 0.0;
       ui backIndex = flowNetwork.flowIndex[nStart + i];
       flowNetwork.flow[backIndex] = flowNetwork.capacity[nStart + i];
@@ -1364,9 +1364,9 @@ __global__ void preFlow(deviceFlowNetworkPointers flowNetwork,
       atomicAdd(totalExcess, flowNetwork.capacity[nStart + i]);
       /*printf("idx %d v %d forward %d backIndex%d \n", i, neigh, nStart + i,
              backIndex);*/
-      if (flowNetwork.excess[neigh] > 1e-6) {
+      if (flowNetwork.excess[neigh] > 1e-3) {
         ui sinkoffset = flowNetwork.offset[i];
-        if (flowNetwork.capacity[sinkoffset] > 1e-6) {
+        if (flowNetwork.capacity[sinkoffset] > 1e-3) {
           double flow =
               min(flowNetwork.excess[neigh], flowNetwork.flow[sinkoffset]);
           flowNetwork.flow[sinkoffset] -= flow;
@@ -1482,7 +1482,7 @@ __global__ void globalRelabel(deviceFlowNetworkPointers flowNetwork,
   for (ui i = idx; i < total; i += TOTAL_THREAD) {
     ui vertexOffset = flowNetwork.offset[i];
     // printf("idx %d v %d offset %d\n", idx, i, vertexOffset);
-    if (flowNetwork.flow[vertexOffset] > 1e-6) {
+    if (flowNetwork.flow[vertexOffset] > 1e-3) {
       flowNetwork.height[i] = 1;
       atomicCAS(capLeft, 1, 0);
     }
@@ -1519,7 +1519,7 @@ __global__ void updateFlownetwork(deviceFlowNetworkPointers flowNetwork,
   double alpha = (upperBound[iter] + lowerBound[iter]) / 2;
 
   if (idx == 0) {
-    if (fabs(flowNetwork.excess[tFlow - 1] - temp) < 1e-1) {
+    if (fabs(flowNetwork.excess[tFlow - 1] - temp) < 1e-3) {
       upperBound[iter] = alpha;
       // printf("\n uper Bound Changes \n");
 

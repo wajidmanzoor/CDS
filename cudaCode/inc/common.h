@@ -132,6 +132,17 @@ typedef struct {
 
 } deviceFlowNetworkPointers;
 
+typedef struct {
+  ui *height;
+  double *excess;
+  ui *offset;
+  ui *neighbors;
+  double *capacity;
+  double *flow;
+  ui *flowIndex;
+
+} hostFlowNetwork;
+
 extern deviceGraphPointers deviceGraph;
 extern deviceDAGpointer deviceDAG;
 extern cliqueLevelDataPointer levelData;
@@ -141,3 +152,4 @@ extern deviceComponentPointers conComp;
 extern devicePrunedNeighbors prunedNeighbors;
 extern deviceCliquesPointer finalCliqueData;
 extern deviceFlowNetworkPointers flowNetwork;
+extern hostFlowNetwork cpuFlownetwork;

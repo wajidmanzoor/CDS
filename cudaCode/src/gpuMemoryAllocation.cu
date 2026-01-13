@@ -153,6 +153,68 @@ void memoryAllocationFlowNetwork(deviceFlowNetworkPointers &flowNetwork,
   cudaDeviceSynchronize();
 }
 
+void allocateHostFlowNetwork(hostFlowNetwork &G, ui vertexSize,
+                             ui neighborSize) {
+  G.height = new ui[vertexSize];
+  G.excess = new double[vertexSize];
+
+  G.offset = new ui[vertexSize + 1];
+  G.neighbors = new ui[neighborSize];
+
+  G.capacity = new double[neighborSize];
+  G.flow = new double[neighborSize];
+  G.flowIndex = new ui[neighborSize];
+}
+
+void copyDeviceToHostFlowNetwork(hostFlowNetwork &host,
+                                 deviceFlowNetworkPointers &device,
+                                 ui vertexSize, ui neighborSize) {
+  chkerr(cudaMemcpy(host.height, device.height, vertexSize * sizeof(ui),
+                    cudaMemcpyDeviceToHost));
+
+  chkerr(cudaMemcpy(host.excess, device.excess, vertexSize * sizeof(double),
+                    cudaMemcpyDeviceToHost));
+
+  chkerr(cudaMemcpy(host.offset, device.offset, (vertexSize + 1) * sizeof(ui),
+                    cudaMemcpyDeviceToHost));
+
+  chkerr(cudaMemcpy(host.neighbors, device.neighbors, neighborSize * sizeof(ui),
+                    cudaMemcpyDeviceToHost));
+
+  chkerr(cudaMemcpy(host.capacity, device.capacity,
+                    neighborSize * sizeof(double), cudaMemcpyDeviceToHost));
+
+  chkerr(cudaMemcpy(host.flow, device.flow, neighborSize * sizeof(double),
+                    cudaMemcpyDeviceToHost));
+
+  chkerr(cudaMemcpy(host.flowIndex, device.flowIndex, neighborSize * sizeof(ui),
+                    cudaMemcpyDeviceToHost));
+}
+void copyHostToDeviceFlowNetwork(deviceFlowNetworkPointers &device,
+                                 hostFlowNetwork &host, ui vertexSize,
+                                 ui neighborSize) {
+  chkerr(cudaMemcpy(device.height, host.height, vertexSize * sizeof(ui),
+                    cudaMemcpyHostToDevice));
+
+  chkerr(cudaMemcpy(device.excess, host.excess, vertexSize * sizeof(double),
+                    cudaMemcpyHostToDevice));
+
+  chkerr(cudaMemcpy(device.offset, host.offset, (vertexSize + 1) * sizeof(ui),
+                    cudaMemcpyHostToDevice));
+
+  chkerr(cudaMemcpy(device.neighbors, host.neighbors, neighborSize * sizeof(ui),
+                    cudaMemcpyHostToDevice));
+
+  chkerr(cudaMemcpy(device.capacity, host.capacity,
+                    neighborSize * sizeof(double), cudaMemcpyHostToDevice));
+
+  chkerr(cudaMemcpy(device.flow, host.flow, neighborSize * sizeof(double),
+                    cudaMemcpyHostToDevice));
+
+  chkerr(cudaMemcpy(device.flowIndex, host.flowIndex, neighborSize * sizeof(ui),
+                    cudaMemcpyHostToDevice));
+}
+
 // Memory deallocation functions
 void freeGraph(deviceGraphPointers &G) {
   chkerr(cudaFree(G.offset));
@@ -222,4 +284,13 @@ void freeFlownetwork(deviceFlowNetworkPointers &F) {
   chkerr(cudaFree(F.capacity));
   chkerr(cudaFree(F.flow));
   chkerr(cudaFree(F.flowIndex));
+}
+void freeHostFlowNetwork(hostFlowNetwork &G) {
+  delete[] G.height;
+  delete[] G.excess;
+  delete[] G.offset;
+  delete[] G.neighbors;
+  delete[] G.capacity;
+  delete[] G.flow;
+  delete[] G.flowIndex;
 }

@@ -20,6 +20,15 @@ void memoryAllocationPrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors,
 void memoryAllocationFlowNetwork(deviceFlowNetworkPointers &flowNetwork,
                                  ui vertexSize, ui neighborSize);
 
+void allocateHostFlowNetwork(hostFlowNetwork &G, ui vertexSize,
+                             ui neighborSize);
+void copyDeviceToHostFlowNetwork(hostFlowNetwork &host,
+                                 deviceFlowNetworkPointers &device,
+                                 ui vertexSize, ui neighborSize);
+void copyHostToDeviceFlowNetwork(deviceFlowNetworkPointers &device,
+                                 hostFlowNetwork &host, ui vertexSize,
+                                 ui neighborSize);
+
 // Function declarations for memory deallocation
 void freeGraph(deviceGraphPointers &G);
 void freeDAG(deviceDAGpointer &D);
@@ -29,3 +38,4 @@ void freeLevelData(cliqueLevelDataPointer &L);
 void freeDensestCore(densestCorePointer &C);
 void freePruneneighbors(devicePrunedNeighbors &P);
 void freeFlownetwork(deviceFlowNetworkPointers &F);
+void freeHostFlowNetwork(hostFlowNetwork &G);
