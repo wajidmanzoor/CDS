@@ -153,6 +153,22 @@ void memoryAllocationFlowNetwork(deviceFlowNetworkPointers &flowNetwork,
   cudaDeviceSynchronize();
 }
 
+ui allocLevelDataBaseline(cliqueLevelDataBaseline &L, ui k, ui pSize, ui cSize,
+                          ui maxDegree) {
+  ui maxBitMask = (maxDegree + 31) / 32;
+
+  cudaMalloc(&L.partialCliques, pSize * sizeof(ui));
+  cudaMalloc(&L.candidates, cSize * sizeof(ui));
+  cudaMalloc(&L.offset, cSize * sizeof(ui));
+  cudaMalloc(&L.validNeighMask, maxCandidates * maxBitMask * sizeof(ui));
+  cudaMalloc(&L.taskCount, sizeof(ui));
+
+  cudaMemset(L.taskCount, 0, sizeof(ui));
+  cudaMemset(L.offset, 0, cSize * sizeof(ui));
+
+  return maxBitMask;
+}
+
 // Memory deallocation functions
 void freeGraph(deviceGraphPointers &G) {
   chkerr(cudaFree(G.offset));

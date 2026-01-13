@@ -56,197 +56,56 @@ void generateDAG(const Graph &graph, deviceGraphPointers &deviceGraph,
   chkerr(cudaFree(listOrder));
 }
 
-ui listAllCliques(const Graph &graph, deviceGraphPointers &deviceGraph,
-                  deviceDAGpointer &deviceDAG, cliqueLevelDataPointer levelData,
-                  ui k, ui pSize, ui cpSize) {
-  /* Listing all k cliques of a graph using Bron–Kerbosch Algorithm.
-   */
+ui listAllCliquesBaseline(const Graph &graph, deviceDAGpointer &deviceDAG,
+                          deviceCliquesPointer &cliqueData, ui k, ui pSize,
+                          ui cSize) {
 
-  // Get max out degree in DAG.
-  thrust::device_ptr<ui> dev_degree(deviceDAG.degree);
-  auto max_iter = thrust::max_element(dev_degree, dev_degree + graph.n);
-  int maxDegree = *max_iter;
+  cliqueLevelDataBaseline A, B;
 
-  // Allocates memory for intermediate results of the clique listing algorithm,
-  // including partial cliques, candidate extensions for each partial clique,
-  // and valid neighbors of each candidate.
-  // Instead of storing actual valid neighbors, a bitmask is used to represent
-  // valid neighbors. The maximum degree determines how many locations are
-  // needed, with each location storing a 32-bit mask for up to 32 neighbors.
+  ui maxDegree = max_element(graph.degree.begin(), graph.degree.end());
 
-  ui maxBitMask = memoryAllocationlevelData(levelData, k, pSize, cpSize,
-                                            maxDegree, TOTAL_WARPS);
+  ui maxBitMask = allocLevelDataBaseline(A, k, MAX_TASKS, MAX_CANDS, maxDegree);
+  allocLevelDataBaseline(B, k, pSize, cSize, maxDegree);
 
-  int level = 0;
-  int iterK = k;
-
-  ui *labels;
-  ui oneLabelSize = (graph.n + 31) / 32;
-  // size_t numBits = static_cast<size_t>(oneLabelSize) * TOTAL_WARPS;
-  /*size_t numBytes = (numBits + 7) / 8;
-  chkerr(cudaMalloc((void **)&(labels), (numBytes)));
-  cudaMemset(labels, 0, numBytes);*/
-  // thrust::device_ptr<ui> dev_labels(labels);
-  // thrust::fill(dev_labels, dev_labels + total_size, iterK);
-  size_t numWords =
-      static_cast<size_t>(oneLabelSize) *
-      TOTAL_WARPS; // Round up to word boundary for 32-bit operations
-  chkerr(cudaMalloc((void **)&(labels), numWords * sizeof(ui)));
-  cudaMemset(labels, 0, numWords * sizeof(ui));
-
-  chkerr(cudaMemcpy(deviceGraph.degree, graph.degree.data(),
-                    graph.n * sizeof(ui), cudaMemcpyHostToDevice));
-  chkerr(cudaMemset(levelData.partialCliquesPartition, 0,
-                    (TOTAL_WARPS * pSize) * sizeof(ui)));
+  // level 0
+  listInitialCliquesBaseline<<<BLK_NUMS, BLK_DIM>>>(D, A, k, graph.n,
+                                                    maxBitMask);
   cudaDeviceSynchronize();
 
-  size_t sharedMemoryIntialClique = WARPS_EACH_BLK * sizeof(ui);
+  ui level = 1;
+  cliqueLevelDataBaseline *curr = &A, *next = &B;
 
-  // Generates initial partial cliques, their candidate extensions, and valid
-  // neighbor masks. The data is stored in virtual partitions, with each warp
-  // writing to a separate partition.
+  ui totalTasks;
+  cudaMemcpy(&totalTasks, curr->taskCount, sizeof(ui), cudaMemcpyDeviceToHost);
 
-  size_t partialSize1 = TOTAL_WARPS * pSize;
-  size_t candidateSize = TOTAL_WARPS * cpSize;
-  size_t offsetSize1 = ((pSize / (k - 1)) + 1) * TOTAL_WARPS;
-  size_t maskSize = candidateSize * maxBitMask;
+  while (level < k - 1) {
+    cudaMemset(next->taskCount, 0, sizeof(ui));
 
-  listIntialCliques<<<BLK_NUMS, BLK_DIM, sharedMemoryIntialClique>>>(
-      deviceDAG, levelData, labels, k, graph.n, pSize, cpSize, maxBitMask,
-      level, TOTAL_WARPS, partialSize1, candidateSize, maskSize, offsetSize1);
-  cudaDeviceSynchronize();
-  CUDA_CHECK_ERROR("Generate Intial Partial Cliques");
-
-  ui partialSize = TOTAL_WARPS * pSize;
-  ui offsetSize = ((pSize / (k - 1)) + 1) * TOTAL_WARPS;
-  ui offsetPartitionSize = ((pSize / (k - 1)) + 1);
-
-  // Used to compute offsets so that partial cliques, candidates, and valid
-  // neighbors can be copied from virtual partition to  contiguous array.
-  createLevelDataOffset(levelData, offsetPartitionSize, TOTAL_WARPS);
-  cudaDeviceSynchronize();
-
-  // write partial cliques, candidates and valid neighbor bitmask from virtual
-  // partition to single arrays.
-  flushParitions<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, pSize, cpSize, k,
-                                        maxBitMask, level, TOTAL_WARPS);
-  cudaDeviceSynchronize();
-  CUDA_CHECK_ERROR("Flush Partition data structure");
-
-  iterK--;
-  level++;
-
-  // Total number of partial cliques (tasks) for next level.
-  int totalTasks;
-  chkerr(cudaMemcpy(&totalTasks, levelData.count + TOTAL_WARPS, sizeof(ui),
-                    cudaMemcpyDeviceToHost));
-  cudaDeviceSynchronize();
-
-  size_t sharedMemoryMid = WARPS_EACH_BLK * sizeof(ui);
-
-  while (iterK > 2) {
-
-    // thrust::device_ptr<ui> dev_labels(labels);
-    // thrust::fill(dev_labels, dev_labels + graph.n * TOTAL_WARPS, iterK);
-    cudaMemset(labels, 0, numWords * sizeof(ui));
-
-    chkerr(cudaMemset(levelData.count, 0, (TOTAL_WARPS + 1) * sizeof(ui)));
-    chkerr(cudaMemset(levelData.temp, 0, (TOTAL_WARPS + 1) * sizeof(ui)));
-    chkerr(cudaMemset(levelData.offsetPartition, 0, (offsetSize) * sizeof(ui)));
-    chkerr(cudaMemset(levelData.validNeighMaskPartition, 0,
-                      (partialSize * maxBitMask) * sizeof(ui)));
+    listMidCliquesBaseline<<<BLK_NUMS, BLK_DIM>>>(D, *curr, *next, k, level,
+                                                  maxBitMask, totalTasks);
     cudaDeviceSynchronize();
 
-    // Add verticies to partial cliques from initial kernel.
-    listMidCliques<<<BLK_NUMS, BLK_DIM, sharedMemoryMid>>>(
-        deviceDAG, levelData, labels, k, graph.n, pSize, cpSize, maxBitMask,
-        totalTasks, level, TOTAL_WARPS);
-    cudaDeviceSynchronize();
+    std::swap(curr, next);
 
-    CUDA_CHECK_ERROR("Generate Mid Partial Cliques");
-
-    // Used to compute offsets so that partial cliques, candidates, and valid
-    // neighbors can be copied from virtual partition to  contiguous array.
-    createLevelDataOffset(levelData, offsetPartitionSize, TOTAL_WARPS);
-
-    chkerr(cudaMemset(levelData.offset, 0, offsetSize * sizeof(ui)));
-    chkerr(cudaMemset(levelData.validNeighMask, 0,
-                      partialSize * maxBitMask * sizeof(ui)));
-    cudaDeviceSynchronize();
-
-    // write partial cliques, candidates and valid neighbor bitmask from virtual
-    // partition to single arrays.
-    flushParitions<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, pSize, cpSize,
-                                          k, maxBitMask, level, TOTAL_WARPS);
-    cudaDeviceSynchronize();
-    CUDA_CHECK_ERROR("Flush Partition data structure");
-
-    // Get total partial cliques (tasks) for next level.
-    chkerr(cudaMemcpy(&totalTasks, levelData.count + TOTAL_WARPS, sizeof(ui),
-                      cudaMemcpyDeviceToHost));
-    cudaDeviceSynchronize();
-
-    iterK--;
+    cudaMemcpy(&totalTasks, curr->taskCount, sizeof(ui),
+               cudaMemcpyDeviceToHost);
     level++;
   }
 
-  chkerr(cudaFree(labels));
+  ui *globalCounter;
+  cudaMalloc(&globalCounter, sizeof(ui));
+  cudaMemset(globalCounter, 0, sizeof(ui));
 
-  // Total Cliques
-  ui *totalCliques;
-  chkerr(cudaMalloc((void **)&totalCliques, sizeof(ui)));
-  chkerr(cudaMemset(totalCliques, 0, sizeof(ui)));
+  memoryAllocationTrie(cliqueData, MAX_TASKS, k);
+
+  writeFinalCliquesBaseline<<<BLK_NUMS, BLK_DIM>>>(
+      *curr, cliqueData, globalCounter, k, totalTasks);
   cudaDeviceSynchronize();
 
-  countCliques<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, levelData, totalCliques,
-                                      maxBitMask, totalTasks, TOTAL_WARPS);
-  cudaDeviceSynchronize();
-  CUDA_CHECK_ERROR("Count Num Cliques");
+  ui totalCliques;
+  cudaMemcpy(&totalCliques, globalCounter, sizeof(ui), cudaMemcpyDeviceToHost);
 
-  // Total Cliques
-  ui tt;
-  chkerr(cudaMemcpy(&tt, totalCliques, sizeof(ui), cudaMemcpyDeviceToHost));
-  cudaDeviceSynchronize();
-  if (tt == 0) {
-    freeLevelData(levelData);
-
-    freeDAG(deviceDAG);
-    return tt;
-  }
-
-  // Stores Final k-cliques of the graph.
-  memoryAllocationTrie(cliqueData, tt, k);
-
-  chkerr(cudaMemset(totalCliques, 0, sizeof(ui)));
-  cudaDeviceSynchronize();
-
-  size_t sharedMemoryFinal = WARPS_EACH_BLK * sizeof(ui);
-
-  // Set status to of each clique to -2, representing not a valid clique.
-  thrust::device_ptr<int> dev_ptr(cliqueData.status);
-  thrust::fill(dev_ptr, dev_ptr + tt, -2);
-
-  chkerr(cudaMemset(cliqueData.trie, 0, tt * k * sizeof(ui)));
-  cudaDeviceSynchronize();
-
-  if (iterK == 2) {
-
-    // Write final k-cliques based on the partial cliques to global memory.
-    writeFinalCliques<<<BLK_NUMS, BLK_DIM, sharedMemoryFinal>>>(
-        deviceGraph, deviceDAG, levelData, cliqueData, totalCliques, k, iterK,
-        graph.n, graph.m, pSize, cpSize, maxBitMask, tt, totalTasks, level,
-        TOTAL_WARPS);
-    cudaDeviceSynchronize();
-    CUDA_CHECK_ERROR("Generate Full Cliques");
-  }
-
-  // Actual total cliques in the graph.
-
-  freeLevelData(levelData);
-
-  freeDAG(deviceDAG);
-
-  return tt;
+  return totalCliques;
 }
 
 void cliqueCoreDecompose(const Graph &graph, deviceGraphPointers &deviceGraph,
@@ -976,8 +835,8 @@ int main(int argc, const char *argv[]) {
     coreDecom_ms = coreDecomEnd - cliqueListEnd;
 
   } else {
-    totalCliques = listAllCliques(graph, deviceGraph, deviceDAG, levelData, k,
-                                  pSize, cpSize);
+    listAllCliquesBaseline(graph, deviceDAG, cliqueData, k, pSize, cSize);
+
     cliqueListEnd = std::chrono::high_resolution_clock::now();
     cliqueList_ms = cliqueListEnd - dagEnd;
 

@@ -19,6 +19,8 @@ void memoryAllocationPrunnedNeighbors(devicePrunedNeighbors &prunedNeighbors,
 
 void memoryAllocationFlowNetwork(deviceFlowNetworkPointers &flowNetwork,
                                  ui vertexSize, ui neighborSize);
+ui allocLevelDataBaseline(cliqueLevelDataBaseline &L, ui k, ui pSize, ui cSize,
+                          ui maxDegree);
 
 // Function declarations for memory deallocation
 void freeGraph(deviceGraphPointers &G);

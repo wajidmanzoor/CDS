@@ -102,6 +102,15 @@ typedef struct {
 } cliqueLevelDataPointer;
 
 typedef struct {
+  ui *partialCliques; // [maxTasks * (k-1)]
+  ui *candidates;     // [maxCandidates]
+  ui *offset;         // [maxTasks + 1]
+  ui *validNeighMask; // [maxCandidates * maxBitMask]
+
+  ui *taskCount; // scalar on device
+} cliqueLevelDataBaseline;
+
+typedef struct {
   ui *mapping;
   ui *reverseMap;
   ui *offset;
@@ -135,9 +144,10 @@ typedef struct {
 extern deviceGraphPointers deviceGraph;
 extern deviceDAGpointer deviceDAG;
 extern cliqueLevelDataPointer levelData;
-extern deviceCliquesPointer cliqueData;
+// extern deviceCliquesPointer cliqueData;
 extern densestCorePointer densestCore;
 extern deviceComponentPointers conComp;
 extern devicePrunedNeighbors prunedNeighbors;
 extern deviceCliquesPointer finalCliqueData;
 extern deviceFlowNetworkPointers flowNetwork;
+extern cliqueLevelDataBaseline cliqueData;
