@@ -31,10 +31,10 @@ private:
                         vector<ui> &label, vector<vector<ui>> &DAG,
                         vector<ui> &validNeighborCount,
                         unordered_map<string, vector<int>> &cliqueData,
-                        vector<ui> cliqueDegree);
-  void BFS(vector<ui> status, int vertex, int index,
+                        vector<long> cliqueDegree);
+  void BFS(vector<ui> &status, int vertex, int index,
            const vector<vector<ui>> &newGraph);
-  void exact(vector<int> res, ConnectedComponentData &conComp,
+  void exact(vector<int> &res, ConnectedComponentData &conComp,
              DensestCoreData &densestCore, finalResult &densestSubgraph,
              double upperBound, double lowerBound);
   void
@@ -57,7 +57,7 @@ public:
   void
   cliqueEnumerationListRecord(vector<vector<ui>> newGraph,
                               unordered_map<string, vector<int>> &cliqueData,
-                              vector<ui> &cliqueDegree, ui motifSize);
+                              vector<long> &cliqueDegree, ui motifSize);
   void locateDensestCore(vector<vector<double>> &coreResults,
                          DensestCoreData &densestCore);
 

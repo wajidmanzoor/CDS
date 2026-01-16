@@ -28,7 +28,7 @@
 #include <set>
 #include <sys/stat.h>
 #include <utility>
-#define debug 1
+#define debug 0
 using namespace std;
 
 typedef unsigned int ui;
