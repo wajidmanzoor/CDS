@@ -182,12 +182,12 @@ void CDS::get2Dneighborhood(unordered_map<int, long> &subgraphResults,
   int num = 0;
   vector<vector<ui>> subGraph;
   subGraph.resize(count);
-  for (ui i = 0; i < count; i++) {
+  for (int i = 0; i < count; i++) {
     int vertex = tempList[i];
     mapArray[i] = vertex;
     map_s[vertex] = num;
     int tempCount = 0;
-    for (int j = 0; j < graph->adjacencyList[vertex].size(); j++) {
+    for (int j = 0; j < (int)graph->adjacencyList[vertex].size(); j++) {
       int neighbor = graph->adjacencyList[vertex][j];
       if (array[neighbor] != 0 && neighbor != vertex) {
         subGraph[num].push_back(neighbor);
@@ -626,7 +626,7 @@ void CDS::listCliqueContainsVertex(ui k, vector<ui> &partialClique,
     for (ui i = 0; i < candidates.size(); i++) {
 
       ui temp = candidates[i];
-      for (int j = 0; j < validNeighborCount[temp]; j++) {
+      for (ui j = 0; j < validNeighborCount[temp]; j++) {
         if (onenode || temp == vertex || DAG[temp][j] == vertex) {
           string wajid = cliqueString + to_string(candidates[i]) + " " +
                          to_string(DAG[temp][j]);
@@ -659,7 +659,7 @@ void CDS::listCliqueContainsVertex(ui k, vector<ui> &partialClique,
       }
       // cout << " valid neighs size of " << temp << " is "
       //    << validNeighbors.size() << endl;
-      for (int j = 0; j < validNeighbors.size(); j++) {
+      for (int j = 0; j < (int)validNeighbors.size(); j++) {
 
         ui canTemp = validNeighbors[j];
         int index = 0;
@@ -816,7 +816,7 @@ void CDS::cliqueEnumerationListRecord(
   validNeighborCount.resize(newGraph.size(), 0);
   cliqueDegree.resize(newGraph.size(), 0);
 
-  listCliqueRecord(motif->size, partialClique, candidates, label, DAG,
+  listCliqueRecord(motifSize, partialClique, candidates, label, DAG,
                    validNeighborCount, cliqueData, cliqueDegree);
 }
 
@@ -870,7 +870,7 @@ void CDS::listCliqueRecord(ui k, vector<ui> &partialClique,
     long cliqueCount = 0;
     for (ui i = 0; i < candidates.size(); i++) {
       int temp = candidates[i];
-      for (int j = 0; j < validNeighborCount[temp]; j++) {
+      for (int j = 0; j < (int)validNeighborCount[temp]; j++) {
         string cliqueString1 =
             cliqueString + to_string(temp) + " " + to_string(DAG[temp][j]);
         if (debug)
@@ -899,11 +899,11 @@ void CDS::listCliqueRecord(ui k, vector<ui> &partialClique,
       cout << "----------------------" << endl;
 
   } else {
-    for (int i = 0; i < candidates.size(); i++) {
+    for (int i = 0; i < (int)candidates.size(); i++) {
       int temp = candidates[i];
       // cout << "temp " << temp << endl;
       vector<ui> validNeighbors;
-      for (int j = 0; j < DAG[temp].size(); j++) {
+      for (int j = 0; j < (int)DAG[temp].size(); j++) {
         if (label[DAG[temp][j]] == k) {
           label[DAG[temp][j]] = k - 1;
           validNeighbors.push_back(DAG[temp][j]);
@@ -911,7 +911,7 @@ void CDS::listCliqueRecord(ui k, vector<ui> &partialClique,
       }
       // cout << validNeighbors.size() << " vn size" << endl;
 
-      for (int j = 0; j < validNeighbors.size(); j++) {
+      for (int j = 0; j < (int)validNeighbors.size(); j++) {
 
         ui canTemp = validNeighbors[j];
         int index = 0;
@@ -949,7 +949,7 @@ void CDS::listCliqueRecord(ui k, vector<ui> &partialClique,
 int CDS::pruneInvalidEdges(vector<vector<ui>> &oldGraph,
                            vector<vector<ui>> &newGraph,
                            unordered_map<string, vector<int>> &cliqueData) {
-  int count = 0;
+  // int count = 0;
   vector<unordered_map<int, int>> validEdges(oldGraph.size());
 
   for (const auto &entry : cliqueData) {
@@ -1050,7 +1050,7 @@ void CDS::connectedComponentDecompose(
     vector<vector<ui>> reverseMapList;
     reverseMapList.resize(index + 1);
 
-    for (ui i = 1; i <= index; i++) {
+    for (int i = 1; i <= index; i++) {
       reverseMapList.resize(graphSizeList[i]);
     }
 
@@ -1079,12 +1079,12 @@ void CDS::connectedComponentDecompose(
     }
 
     for (ui i = 0; i < newGraph.size(); i++) {
-      for (int j = 0; j < newGraph[i].size(); j++) {
+      for (int j = 0; j < (int)newGraph[i].size(); j++) {
         graphList[status[i]][oldToNew[i]].push_back(oldToNew[newGraph[i][j]]);
       }
     }
 
-    for (ui i = 1; i < index + 1; i++) {
+    for (int i = 1; i < index + 1; i++) {
       ConnectedComponentData conComp;
       conComp.totalCliques = 0;
       conComp.cliqueDegree.resize(graphSizeList[i], 0);
@@ -1135,7 +1135,7 @@ void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
 
   // Initialize densest subgraph with current component
   densestSubgraph.verticies.resize(current.size);
-  for (ui i = 0; i < current.size; i++) {
+  for (int i = 0; i < current.size; i++) {
     densestSubgraph.verticies[i] =
         densestCore.reverseMap[current.reverseMap[i]];
   }
@@ -1209,7 +1209,7 @@ void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
         cliqueCount += temp[i];
     }
 
-    for (ui i = 0; i < current.size; i++) {
+    for (int i = 0; i < current.size; i++) {
       if (res[i] != -1)
         vertexCount++;
     }
@@ -1231,7 +1231,7 @@ void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
       densestSubgraph.verticies.clear();
       densestSubgraph.verticies.reserve(vertexCount);
 
-      for (ui i = 0; i < current.size; i++) {
+      for (int i = 0; i < current.size; i++) {
         if (res[i] != -1) {
           densestSubgraph.verticies.push_back(
               densestCore.reverseMap[current.reverseMap[i]]);
@@ -1313,7 +1313,7 @@ void CDS::createFlownetwork(FlowNetwork &FN, ConnectedComponentData &C,
     float count = clq[motif->size];
     float w = count * (motif->size - 1);
 
-    for (int i = 0; i < motif->size; i++) {
+    for (ui i = 0; i < motif->size; i++) {
       int v = clq[i];
       FN.addEdge(idx, v, w);     // clique → vertex
       FN.addEdge(v, idx, count); // vertex → clique
@@ -1483,6 +1483,7 @@ void CDS::DSD() {
       }
       cout << endl;
     }
+    cout << "New Neighbor size: " << validEdgeCount << endl;
   }
 
   vector<ConnectedComponentData> conCompList;
