@@ -1,51 +1,79 @@
-# ===== Compiler =====
-CXX = clang++
-CXXFLAGS = -std=c++17 -Wall -g -O0
+# =======================
+# Compiler
+# =======================
+CXX := g++
 
-# ===== Directories =====
-SRCDIR = src
-INCDIR = inc
-OBJDIR = obj
+# =======================
+# Directories
+# =======================
+SRCDIR := src
+INCDIR := inc
+OBJDIR := obj
+BINDIR := bin
 
-# ===== Sources =====
-SOURCES = $(SRCDIR)/main.cpp \
-          $(SRCDIR)/graph.cpp \
-          $(SRCDIR)/common.cpp \
-          $(SRCDIR)/helpers.cpp
+# =======================
+# Target
+# =======================
+TARGET := dsd
 
-# ===== Objects =====
-OBJECTS = $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o,$(SOURCES))
+# =======================
+# Source files
+# =======================
+SOURCES := main.cpp \
+           $(SRCDIR)/graph.cpp \
+           $(SRCDIR)/common.cpp \
+           $(SRCDIR)/helpers.cpp
 
-# ===== Target =====
-TARGET = dsd
+OBJECTS := $(patsubst %.cpp,$(OBJDIR)/%.o,$(SOURCES))
+
+# =======================
+# Compiler flags (PRODUCTION)
+# =======================
+CXXFLAGS := -std=c++17 \
+            -O3 \
+            -march=native \
+            -ffast-math \
+            -funroll-loops \
+            -DNDEBUG \
+            -Wall \
+            -Wextra \
+            -I$(INCDIR)
+
+# =======================
+# Linker flags
+# =======================
+LDFLAGS := -O3 -march=native -flto
 
 # =======================
 # Default target
 # =======================
-all: $(TARGET)
+all: $(BINDIR)/$(TARGET)
 
 # =======================
-# Create obj directory
+# Create directories
 # =======================
 $(OBJDIR):
-	mkdir -p $(OBJDIR)
+	mkdir -p $(OBJDIR)/$(SRCDIR)
 
-# =======================
-# Link
-# =======================
-$(TARGET): $(OBJDIR) $(OBJECTS)
-	$(CXX) $(CXXFLAGS) $(OBJECTS) -o $@
+$(BINDIR):
+	mkdir -p $(BINDIR)
 
 # =======================
 # Compile
 # =======================
-$(OBJDIR)/%.o: $(SRCDIR)/%.cpp
-	$(CXX) $(CXXFLAGS) -I$(INCDIR) -c $< -o $@
+$(OBJDIR)/%.o: %.cpp | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# =======================
+# Link
+# =======================
+$(BINDIR)/$(TARGET): $(OBJECTS) | $(BINDIR)
+	$(CXX) $(OBJECTS) $(LDFLAGS) -o $@
 
 # =======================
 # Clean
 # =======================
 clean:
-	rm -rf $(OBJDIR) $(TARGET)
+	rm -rf $(OBJDIR) $(BINDIR)
 
 .PHONY: all clean

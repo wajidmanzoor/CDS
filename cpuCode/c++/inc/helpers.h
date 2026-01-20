@@ -34,21 +34,18 @@ private:
                         vector<long> cliqueDegree);
   void BFS(vector<ui> &status, int vertex, int index,
            const vector<vector<ui>> &newGraph);
-  void exact(vector<int> &res, ConnectedComponentData &conComp,
-             DensestCoreData &densestCore, finalResult &densestSubgraph,
-             double upperBound, double lowerBound);
-  void
-  createFlownetwork(vector<unordered_map<int, array<double, 2>>> &flowNetwork,
-                    ConnectedComponentData &conComp, double aplha);
-  void
-  updateFlownetwork(vector<unordered_map<int, array<double, 2>>> &flowNetwork,
-                    ConnectedComponentData &conComp, double alpha);
-  double edmondsKarp(vector<unordered_map<int, array<double, 2>>> &flowNetwork,
-                     vector<int> &parent, ConnectedComponentData &conComp,
-                     double alpha);
-  double augmentPath(vector<unordered_map<int, array<double, 2>>> &flowNetwork,
-                     vector<int> &parent, ConnectedComponentData &conComp,
-                     double alpha);
+  void exact(vector<int> &res, ConnectedComponentData &C, float lowerBound,
+             float upperBound);
+  void createFlownetwork(FlowNetwork &FN, ConnectedComponentData &C,
+                         float alpha);
+  // float edmondsKarp(FlowNetwork &FN, vector<int> &parent);
+  float edmondsKarp(FlowNetwork &FN, vector<pair<int, int>> &parent);
+
+  void updateFlownetwork(FlowNetwork &FN, ConnectedComponentData &C,
+                         float alpha);
+
+  // float augmentPath(FlowNetwork &FN, vector<int> &parent);
+  float augmentPath(FlowNetwork &FN, vector<pair<int, int>> &parent);
 
 public:
   CDS();
