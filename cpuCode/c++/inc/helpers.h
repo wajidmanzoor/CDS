@@ -6,6 +6,8 @@ class CDS {
 private:
   Graph *graph;
   Motif *motif;
+  bool ub1;
+  bool ub2;
   void get2Dneighborhood(unordered_map<int, long> &subgraphResults, int index,
                          vector<int> &mark, vector<int> &array,
                          vector<int> &map_s);
@@ -49,7 +51,7 @@ private:
 
 public:
   CDS();
-  CDS(Graph *graph, Motif *motif);
+  CDS(Graph *graph, Motif *motif, bool ub1, bool ub2);
   void cliqueCoreDecompose(vector<vector<double>> &results);
   void
   cliqueEnumerationListRecord(vector<vector<ui>> newGraph,
@@ -68,7 +70,7 @@ public:
                               vector<ConnectedComponentData> &conCompList);
   void dynamicExact(vector<ConnectedComponentData> &conCompList,
                     DensestCoreData &densestCore, finalResult &densestSubgraph,
-                    bool ub1, bool ub2);
+                    float &ub1_val, float &ub2_val, bool ub1, bool ub2);
 
   void DSD();
 };

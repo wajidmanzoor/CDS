@@ -6,9 +6,11 @@
 
 CDS ::CDS() {}
 
-CDS ::CDS(Graph *graph, Motif *motif) {
+CDS ::CDS(Graph *graph, Motif *motif, bool ub1, bool ub2) {
   this->graph = graph;
   this->motif = motif;
+  this->ub1 = ub1;
+  this->ub2 = ub2;
 }
 
 void CDS ::cliqueCoreDecompose(vector<vector<double>> &results) {
@@ -329,6 +331,10 @@ void CDS::cliqueEnumerationFast() {
 
   vector<ui> validNeighborCount;
   validNeighborCount.resize(graph->n, 0);
+  for (ui i = 0; i < validNeighborCount.size(); i++) {
+    validNeighborCount[i] = DAG[i].size();
+    // cout << "val c of i :" << i << " is: " << DAG[i].size() << endl;
+  }
   graph->cliqueDegree.resize(graph->n, 0);
   graph->totalCliques = 0;
 
@@ -560,6 +566,9 @@ void CDS::cliqueEnumerationSubgraph(vector<vector<ui>> &subGraph,
   label.resize(subGraph.size(), motif->size);
   vector<ui> validNeighborCount;
   validNeighborCount.resize(subGraph.size(), 0);
+  for (ui i = 0; i < validNeighborCount.size(); i++) {
+    validNeighborCount[i] = DAG[i].size();
+  }
   // cout << "before clique list subgraph clique degree " << endl;
   /*for (ui v : subGraphCliqueDegree) {
     cout << v << " ";
@@ -714,9 +723,6 @@ void CDS::locateDensestCore(vector<vector<double>> &coreResults,
 
   int lowerBound = (int)ceil(max);
 
-  cout << "max Density: " << lowerBound << endl;
-  cout << "Max clique core: " << graph->maxCliquecore << endl;
-
   // int lowerBound = (int)ceil(max);
 
   int index = 1;
@@ -815,6 +821,9 @@ void CDS::cliqueEnumerationListRecord(
   vector<ui> validNeighborCount;
   validNeighborCount.resize(newGraph.size(), 0);
   cliqueDegree.resize(newGraph.size(), 0);
+  for (ui i = 0; i < validNeighborCount.size(); i++) {
+    validNeighborCount[i] = DAG[i].size();
+  }
 
   listCliqueRecord(motifSize, partialClique, candidates, label, DAG,
                    validNeighborCount, cliqueData, cliqueDegree);
@@ -1074,7 +1083,7 @@ void CDS::connectedComponentDecompose(
 
     vector<vector<vector<ui>>> graphList;
     graphList.resize(index + 1);
-    for (ui i = 1; i < index + 1; i++) {
+    for (int i = 1; i < index + 1; i++) {
       graphList[i].resize(graphSizeList[i]);
     }
 
@@ -1109,7 +1118,8 @@ void CDS::connectedComponentDecompose(
 
 void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
                        DensestCoreData &densestCore,
-                       finalResult &densestSubgraph, bool ub1, bool ub2) {
+                       finalResult &densestSubgraph, float &ub1_val,
+                       float &ub2_val, bool ub1, bool ub2) {
 
   // --------------------------------------------------
   // 1. Find initial lower bound from components
@@ -1163,7 +1173,8 @@ void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
       float dem = expf(log_fact / k);
       float num = powf((float)current.totalCliques, (k - 1.0f) / k);
 
-      float ub1_val = num / dem;
+      ub1_val = num / dem;
+
       if (ub1_val < upperBound)
         upperBound = ub1_val;
     }
@@ -1173,7 +1184,7 @@ void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
     // ------------------------------------------------
     if (ub2) {
       float dem = (float)(motif->size * current.totalCliques);
-      float ub2_val = 0.0f;
+      ub2_val = 0.0f;
 
       for (ui v = 0; v < current.cliqueDegree.size(); v++) {
         float pv = current.cliqueDegree[v] / dem;
@@ -1421,10 +1432,6 @@ void CDS::DSD() {
            << " |  " << results[i][3] << " | " << results[i][4] << endl;
     }
   }
-  for (ui i = 0; i < results.size(); i++) {
-    cout << results[i][0] << " | " << results[i][1] << " | " << results[i][2]
-         << " |  " << results[i][3] << " | " << results[i][4] << endl;
-  }
 
   DensestCoreData densestCore;
   t1 = Clock::now();
@@ -1519,8 +1526,11 @@ void CDS::DSD() {
 
   finalResult densestSubgraph;
   t1 = Clock::now();
+  float ub1_val;
+  float ub2_val;
 
-  dynamicExact(conCompList, densestCore, densestSubgraph, true, true);
+  dynamicExact(conCompList, densestCore, densestSubgraph, ub1_val, ub2_val, ub1,
+               ub2);
   t2 = Clock::now();
   double time_de = std::chrono::duration<double, std::milli>(t2 - t1).count();
   auto end = Clock::now();
@@ -1528,19 +1538,46 @@ void CDS::DSD() {
   double time_ms =
       std::chrono::duration<double, std::milli>(end - start).count();
 
-  std::cout << "Execution time: " << time_ms << " ms" << std::endl;
-  std::cout << "Component decompose: " << time_cd << " ms" << std::endl;
-  std::cout << "Locate core: " << time_lc << " ms" << std::endl;
-  std::cout << "Clique Listing: " << time_cl << " ms" << std::endl;
-  std::cout << "Prune Edges: " << time_pe << " ms" << std::endl;
-  std::cout << "Connected components: " << time_cc << " ms" << std::endl;
-  std::cout << "Dynamic Exact: " << time_de << " ms" << std::endl;
+  cout << "Execution_time: " << time_ms << " ms" << endl;
+  cout << "Component_decompose: " << time_cd << " ms" << endl;
+  cout << "Locate_core: " << time_lc << " ms" << endl;
+  cout << "Clique_Listing: " << time_cl << " ms" << endl;
+  cout << "Prune_Edges: " << time_pe << " ms" << endl;
+  cout << "Connected_components: " << time_cc << " ms" << endl;
+  cout << "Dynamic_Exact: " << time_de << " ms" << endl;
 
-  cout << "Final Results" << endl;
+  cout << "Total_cliques: " << graph->totalCliques << endl;
+  cout << "Densest_core_deleted_cliques: " << densestCore.delCliqueCount
+       << endl;
+  cout << "Denseset_core_kmax: " << densestCore.maxCliqueCore << endl;
+  cout << "Denseset_core_density: " << densestCore.density << endl;
+  cout << "Densest_core_size: " << densestCore.graph.size() << endl;
+  int edgeCount = 0;
+  for (vector<ui> v : densestCore.graph) {
+    edgeCount += v.size();
+  }
+  cout << "Densest_core_edges_count: " << edgeCount / 2 << endl;
+  cout << "Remaining_edges_after_prune: " << validEdgeCount << endl;
+  cout << "Component_number: " << conCompList.size() << endl;
+
+  double lb = 0;
+  for (ui i = 0; i < conCompList.size(); i++) {
+    if (lb < conCompList[i].density) {
+      lb = conCompList[i].density;
+    }
+  }
+  cout << "Paper_lower_bound: " << lb << endl;
+  cout << "Paper_upper_bopund: " << densestCore.maxCliqueCore << endl;
+  if (ub1)
+    cout << "UB1: " << ub1_val << endl;
+  if (ub2)
+    cout << "UB2: " << ub2_val << endl;
+
   cout << "K: " << motif->size << endl;
   cout << "Density: " << densestSubgraph.density << endl;
   cout << "Size: " << densestSubgraph.size << endl;
   cout << "densest subgraph: ";
+
   for (ui v : densestSubgraph.verticies) {
     cout << v << " ";
   }
