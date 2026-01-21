@@ -4,6 +4,7 @@
 #define mav(a, b) ((a) < (b) ? (b) : (a))
 
 #include <assert.h>
+#include <cfloat>
 #include <string.h>
 
 #include <cstdlib>
@@ -25,12 +26,14 @@
 #include <limits.h>
 #include <map>
 #include <mutex>
-#include <omp.h>
 #include <set>
 #include <sys/stat.h>
 #include <utility>
 
+#include <omp.h>
+
 #define debug 1
+#define THREAD_COUNT 8;
 using namespace std;
 
 typedef unsigned int ui;
@@ -67,4 +70,30 @@ struct finalResult {
   vector<ui> verticies;
   double density;
   ui size;
+};
+
+struct Edge {
+  int to;
+  int rev;   // index of reverse edge
+  float cap; // remaining capacity
+  float max; // max capacity
+};
+
+struct FlowNetwork {
+  vector<vector<Edge>> G;
+  vector<int> sinkEdgeIdx; // cache vertex → sink edge
+  int source, sink;
+
+  void init(int n) {
+    G.clear();
+    G.resize(n);
+    sinkEdgeIdx.assign(n, -1);
+  }
+
+  inline void addEdge(int u, int v, float cap) {
+    Edge a{v, (int)G[v].size(), cap, cap};
+    Edge b{u, (int)G[u].size(), 0.0f, 0.0f};
+    G[u].push_back(a);
+    G[v].push_back(b);
+  }
 };
