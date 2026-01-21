@@ -321,31 +321,61 @@ void CDS::cliqueEnumerationFast() {
   vector<vector<ui>> DAG;
   generateDAG(graph->adjacencyList, DAG, order);
 
-  vector<ui> partialClique;
-  vector<ui> candidates;
-  for (ui i = 0; i < graph->n; i++) {
-    candidates.push_back(i);
-  }
-  vector<ui> label;
-  label.resize(graph->n, motif->size);
-
-  vector<ui> validNeighborCount;
-  validNeighborCount.resize(graph->n, 0);
-  for (ui i = 0; i < validNeighborCount.size(); i++) {
-    validNeighborCount[i] = DAG[i].size();
-    // cout << "val c of i :" << i << " is: " << DAG[i].size() << endl;
-  }
+  // Initialize results
   graph->cliqueDegree.resize(graph->n, 0);
   graph->totalCliques = 0;
 
-  // cout << "Before listCliques" << endl;
+  const int numThreads = omp_get_max_threads();
 
-  listCliques(motif->size, partialClique, candidates, label, DAG,
-              validNeighborCount);
+#pragma omp parallel
+  {
+    // Each thread needs its own copy of DAG since the algorithm modifies it
+    vector<vector<ui>> localDAG = DAG;
 
-  // cout << "donefinal" << endl;
+    // Thread-local result accumulators
+    vector<long> localCliqueDegree(graph->n, 0);
+    long localTotalCliques = 0;
+
+    // Thread-private recursion data
+    vector<ui> partialClique;
+    partialClique.reserve(motif->size);
+    vector<ui> label(graph->n, motif->size);
+    vector<ui> validNeighborCount(graph->n);
+
+    // Initialize validNeighborCount for all vertices
+    for (ui i = 0; i < graph->n; i++) {
+      validNeighborCount[i] = localDAG[i].size();
+    }
+
+#pragma omp for schedule(dynamic, 5)
+    for (ui startVertex = 0; startVertex < graph->n; startVertex++) {
+      // Reset data structures for this starting vertex
+      partialClique.clear();
+      fill(label.begin(), label.end(), motif->size);
+
+      // Re-initialize validNeighborCount for this search
+      for (ui i = 0; i < graph->n; i++) {
+        validNeighborCount[i] = localDAG[i].size();
+      }
+
+      vector<ui> candidates = {startVertex};
+
+      // Call the recursive function with local DAG copy
+      listCliquesLocal(motif->size, partialClique, candidates, label, localDAG,
+                       validNeighborCount, localCliqueDegree,
+                       localTotalCliques);
+    }
+
+// Reduce thread-local results into global counters
+#pragma omp critical
+    {
+      graph->totalCliques += localTotalCliques;
+      for (ui v = 0; v < graph->n; v++) {
+        graph->cliqueDegree[v] += localCliqueDegree[v];
+      }
+    }
+  }
 }
-
 void CDS::generateDAG(const vector<vector<ui>> adjList, vector<vector<ui>> &DAG,
                       vector<ui> &order) {
   DAG.resize(adjList.size());
@@ -395,140 +425,82 @@ void CDS::generateDAG(const vector<vector<ui>> adjList, vector<vector<ui>> &DAG,
   }*/
 }
 
-void CDS::listCliques(ui k, vector<ui> &partialClique, vector<ui> &candidates,
-                      vector<ui> &label, vector<vector<ui>> &DAG,
-                      vector<ui> &validNeighborCount) {
-
-  if (debug) {
-    cout << "partial Clique: ";
-    for (ui pc : partialClique) {
-      cout << pc << " ";
-    }
-    cout << endl << " candidates: ";
-    for (ui c : candidates) {
-      cout << c << " ";
-    }
-    cout << endl << " label: ";
-    for (ui l : label) {
-      cout << l << " ";
-    }
-    cout << endl << " vnc: ";
-    for (ui vn : validNeighborCount) {
-      cout << vn << " ";
-    }
-    cout << endl;
-    int x = 0;
-    for (ui vn : validNeighborCount) {
-      cout << "valid neighbors of " << x << ": ";
-      if (vn > 0) {
-        for (ui neig : DAG[x]) {
-          cout << neig << " ";
-        }
-      }
-      x++;
-
-      cout << endl;
-    }
-    cout << "total Cliques " << graph->totalCliques << endl;
-  }
+void CDS::listCliquesLocal(ui k, vector<ui> &partialClique,
+                           vector<ui> &candidates, vector<ui> &label,
+                           vector<vector<ui>> &DAG, // NOT const - we modify it!
+                           vector<ui> &validNeighborCount,
+                           vector<long> &localCliqueDegree,
+                           long &localTotalCliques) {
 
   if (k == 2) {
-    if (debug)
-      cout << "----------------------" << endl;
-    string cliqueString = "";
-    for (ui i = 0; i < partialClique.size(); i++) {
-      cliqueString += to_string(partialClique[i]) + " ";
-    }
-    // cout << "I am here" << endl;
-
+    // Base case - count cliques
     long cliqueCount = 0;
-    // cout << "can size " << candidates.size() << endl;
+
     for (ui i = 0; i < candidates.size(); i++) {
-
-      int temp = candidates[i];
-      // cout << "k-1 can:" << temp << " vn size" << validNeighborCount[temp]
-      //    << endl;
+      ui temp = candidates[i];
       for (ui j = 0; j < validNeighborCount[temp]; j++) {
-        string wajid = cliqueString + to_string(candidates[i]) + " " +
-                       to_string(DAG[temp][j]);
-        if (debug)
-          cout << "clique number " << graph->totalCliques << " : " << wajid
-               << endl;
-
-        // cout << "j " << endl;
         cliqueCount++;
-        graph->totalCliques++;
-        graph->cliqueDegree[DAG[temp][j]]++;
-        graph->cliqueDegree[temp]++;
+        localTotalCliques++;
+        localCliqueDegree[DAG[temp][j]]++;
+        localCliqueDegree[temp]++;
       }
     }
 
-    // /cout << cliqueString << " Total Cliques " << graph->totalCliques <<
-    // endl;
+    // Add clique count to partial clique vertices
     for (ui i = 0; i < partialClique.size(); i++) {
-      int temp = partialClique[i];
-      // cout << " temp " << temp << " clique Count " << cliqueCount << " Prev "
-      //     << graph->cliqueDegree[temp] << endl;
-      graph->cliqueDegree[temp] += cliqueCount;
+      ui temp = partialClique[i];
+      localCliqueDegree[temp] += cliqueCount;
     }
-    if (debug)
-      cout << "----------------------" << endl;
 
   } else {
     for (int i = 0; i < (int)candidates.size(); i++) {
-      int temp = candidates[i];
+      ui temp = candidates[i];
       vector<ui> validNeighbors;
+
+      // Find valid neighbors for recursion
       for (int j = 0; j < (int)DAG[temp].size(); j++) {
         if (label[DAG[temp][j]] == k) {
           label[DAG[temp][j]] = k - 1;
           validNeighbors.push_back(DAG[temp][j]);
         }
       }
-      // cout << "Can :" << temp << endl;
 
+      // Update validNeighborCount for each valid neighbor
       for (int j = 0; j < (int)validNeighbors.size(); j++) {
-
         ui canTemp = validNeighbors[j];
-        // cout << "Valid Neighs: " << canTemp << endl;
-
         int index = 0;
+
+        // Rearrange DAG[canTemp] to put valid neighbors first
         for (int m = DAG[canTemp].size() - 1; m > index; --m) {
           if (label[DAG[canTemp][m]] == k - 1) {
             while (index < m && label[DAG[canTemp][index]] == k - 1) {
-              // cout << "index: " << index << endl;
               index++;
             }
             if (label[DAG[canTemp][index]] != k - 1) {
-              // cout << "final index :" << index << " m " << m << endl;
-              int temp1 = DAG[canTemp][m];
+              // Swap - this is why DAG cannot be const!
+              ui tempVal = DAG[canTemp][m];
               DAG[canTemp][m] = DAG[canTemp][index];
-              DAG[canTemp][index] = temp1;
+              DAG[canTemp][index] = tempVal;
             }
           }
         }
 
-        // cout << "index at end: " << index << endl;
-
-        // cout << "DAG of " << canTemp << " size: " << DAG[canTemp].size()
-        // << endl;
-
-        if (DAG[canTemp].size() != 0)
-          if (label[DAG[canTemp][index]] == k - 1)
-            index++;
-        // cout << "index after: " << index << " label " << canTemp << endl;
-
+        // Update valid neighbor count
+        if (!DAG[canTemp].empty() && label[DAG[canTemp][index]] == k - 1) {
+          index++;
+        }
         validNeighborCount[canTemp] = index;
       }
 
-      // cout << "done" << endl;
+      // Recursive call
       partialClique.push_back(temp);
-      listCliques(k - 1, partialClique, validNeighbors, label, DAG,
-                  validNeighborCount);
+      listCliquesLocal(k - 1, partialClique, validNeighbors, label, DAG,
+                       validNeighborCount, localCliqueDegree,
+                       localTotalCliques);
       partialClique.pop_back();
-      // cout << "done2" << endl;
-      // cout << " size vn: " << validNeighbors.size() << endl;
+
+      // Restore labels
       for (ui j = 0; j < validNeighbors.size(); j++) {
-        // cout << "j " << j << endl;
         label[validNeighbors[j]] = k;
       }
     }

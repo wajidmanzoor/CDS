@@ -18,9 +18,12 @@ private:
   void coreDecompose(const vector<vector<ui>> adjList,
                      vector<ui> &reverseCoreSortedVertices, vector<ui> &degree,
                      vector<ui> &core, bool fullGraph = true);
-  void listCliques(ui k, vector<ui> &partialClique, vector<ui> &candidates,
-                   vector<ui> &label, vector<vector<ui>> &DAG,
-                   vector<ui> &validNeighborCount);
+  void listCliquesLocal(ui k, vector<ui> &partialClique, vector<ui> &candidates,
+                        vector<ui> &label,
+                        vector<vector<ui>> &DAG, // NOT const - we modify it!
+                        vector<ui> &validNeighborCount,
+                        vector<long> &localCliqueDegree,
+                        long &localTotalCliques);
   void cliqueEnumerationSubgraph(vector<vector<ui>> &subGraph,
                                  vector<ui> &subGraphCliqueDegree, ui motifSize,
                                  ui vertex);
