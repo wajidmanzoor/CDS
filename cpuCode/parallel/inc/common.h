@@ -30,11 +30,13 @@
 #include <sys/stat.h>
 #include <utility>
 
+#include <chrono>
 #include <omp.h>
 
 #define debug 1
-#define THREAD_COUNT 8;
+#define THREAD_COUNT 8
 using namespace std;
+using Clock = std::chrono::high_resolution_clock;
 
 typedef unsigned int ui;
 typedef unsigned short ushort;

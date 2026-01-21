@@ -1146,9 +1146,6 @@ void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
                        finalResult &densestSubgraph, float &ub1_val,
                        float &ub2_val, bool ub1, bool ub2) {
 
-  // --------------------------------------------------
-  // 1. Find initial lower bound from components
-  // --------------------------------------------------
   ConnectedComponentData current = conCompList[0];
   float lowerBound = 0.0f;
 
@@ -1158,8 +1155,6 @@ void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
       current = conCompList[i];
     }
   }
-
-  // cout << "lower bound " << lowerBound << endl;
 
   // Core density dominates component density
   if (ceil(lowerBound) < ceil(densestCore.density)) {
@@ -1177,105 +1172,223 @@ void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
   densestSubgraph.size = current.size;
   densestSubgraph.density = lowerBound;
 
-  // --------------------------------------------------
-  // 2. Iterate over connected components
-  // --------------------------------------------------
-  vector<int> res;
+  atomic<float> globalLowerBound(lowerBound);
+  atomic<float> globalUpperBound(upperBound);
+  finalResult globalBest = densestSubgraph;
+  omp_lock_t bestLock;
+  omp_init_lock(&bestLock);
+#pragma omp parallel
+  {
+    finalResult threadBest = globalBest;
+    float threadLower = globalLowerBound.load();
+    float threadUpper = globalUpperBound.load();
+#pragma omp for schedule(dynamic)
+    for (ui cid = 0; cid < conCompList.size(); cid++) {
+      current = conCompList[cid];
 
-  for (ui cid = 0; cid < conCompList.size(); cid++) {
-
-    current = conCompList[cid];
-
-    // ------------------------------------------------
-    // UB1 (factorial-based bound)
-    // ------------------------------------------------
-    if (ub1) {
-      float k = (float)motif->size;
-      float log_fact = 0.0f;
-      for (ui i = 1; i <= motif->size; ++i)
-        log_fact += logf((float)i);
-
-      float dem = expf(log_fact / k);
-      float num = powf((float)current.totalCliques, (k - 1.0f) / k);
-
-      ub1_val = num / dem;
-
-      if (ub1_val < upperBound)
-        upperBound = ub1_val;
-    }
-
-    // ------------------------------------------------
-    // UB2 (degree-based bound)
-    // ------------------------------------------------
-    if (ub2) {
-      float dem = (float)(motif->size * current.totalCliques);
-      ub2_val = 0.0f;
-
-      for (ui v = 0; v < current.cliqueDegree.size(); v++) {
-        float pv = current.cliqueDegree[v] / dem;
-        ub2_val += pv * pv;
+      float localUpper = threadUpper;
+      if (ub1) {
+        float k = (float)motif->size;
+        float log_fact = 0.0f;
+        for (ui i = 1; i <= motif->size; ++i)
+          log_fact += logf((float)i);
+        float dem = expf(log_fact / k);
+        float num = powf((float)current.totalCliques, (k - 1.0f) / k);
+        float localUb1 = num / dem;
+        if (localUb1 < localUpper)
+          localUpper = localUb1;
       }
 
-      ub2_val *= current.totalCliques;
-      if (ub2_val < upperBound)
-        upperBound = ub2_val;
-    }
-
-    // ------------------------------------------------
-    // 3. Exact solve on this component
-    // ------------------------------------------------
-    exact(res, current, lowerBound, upperBound);
-
-    // cout << "after exact" << endl;
-
-    // ------------------------------------------------
-    // 4. Count motifs and vertices in result
-    // ------------------------------------------------
-    long cliqueCount = 0;
-    ui vertexCount = 0;
-
-    for (const auto &entry : current.cliqueData) {
-      const vector<int> &temp = entry.second;
-      int i = 0;
-      for (; i < (int)temp.size() - 1; ++i) {
-        if (res[temp[i]] == -1)
-          break;
+      if (ub2) {
+        float dem = (float)(motif->size * current.totalCliques);
+        float localUb2 = 0.0f;
+        for (ui v = 0; v < current.cliqueDegree.size(); v++) {
+          float pv = current.cliqueDegree[v] / dem;
+          localUb2 += pv * pv;
+        }
+        localUb2 *= current.totalCliques;
+        if (localUb2 < localUpper)
+          localUpper = localUb2;
       }
-      if (i == (int)temp.size() - 1)
-        cliqueCount += temp[i];
+
+      vector<int> res;
+      exact(res, current, threadLower, localUpper);
+
+      long cliqueCount = 0;
+      ui vertexCount = 0;
+      for (const auto &entry : current.cliqueData) {
+        const vector<int> &temp = entry.second;
+        int i = 0;
+        for (; i < (int)temp.size() - 1; ++i) {
+          if (res[temp[i]] == -1)
+            break;
+        }
+        if (i == (int)temp.size() - 1)
+          cliqueCount += temp[i];
+      }
+      for (int i = 0; i < current.size; i++) {
+        if (res[i] != -1)
+          vertexCount++;
+      }
+      if (vertexCount == 0)
+        vertexCount = current.size;
+      float density = (float)cliqueCount / (float)vertexCount;
+
+      if (density > threadBest.density) {
+        threadBest.density = density;
+        threadBest.size = vertexCount;
+        threadBest.verticies.clear();
+        threadBest.verticies.reserve(vertexCount);
+        for (int i = 0; i < current.size; i++) {
+          if (res[i] != -1) {
+            threadBest.verticies.push_back(
+                densestCore.reverseMap[current.reverseMap[i]]);
+          }
+        }
+        threadLower = density; // Tighten local bound
+      }
     }
+    omp_set_lock(&bestLock);
+    if (threadBest.density > globalBest.density) {
+      globalBest = threadBest;
+      globalLowerBound.store(threadBest.density);
+    }
+    omp_unset_lock(&bestLock);
+  }
+  omp_destroy_lock(&bestLock);
+  densestSubgraph = globalBest;
+}
+
+// =======
+// Serial Code
+// =======
+
+/*ConnectedComponentData current = conCompList[0];
+float lowerBound = 0.0f;
+
+for (ui i = 0; i < conCompList.size(); i++) {
+  if (lowerBound < conCompList[i].density) {
+    lowerBound = conCompList[i].density;
+    current = conCompList[i];
+  }
+}
+
+// cout << "lower bound " << lowerBound << endl;
+
+// Core density dominates component density
+if (ceil(lowerBound) < ceil(densestCore.density)) {
+  lowerBound = densestCore.density;
+}
+
+float upperBound = densestCore.maxCliqueCore;
+
+// Initialize densest subgraph with current component
+densestSubgraph.verticies.resize(current.size);
+for (int i = 0; i < current.size; i++) {
+  densestSubgraph.verticies[i] = densestCore.reverseMap[current.reverseMap[i]];
+}
+densestSubgraph.size = current.size;
+densestSubgraph.density = lowerBound;
+
+// --------------------------------------------------
+// 2. Iterate over connected components
+// --------------------------------------------------
+vector<int> res;
+
+for (ui cid = 0; cid < conCompList.size(); cid++) {
+
+  current = conCompList[cid];
+
+  // ------------------------------------------------
+  // UB1 (factorial-based bound)
+  // ------------------------------------------------
+  if (ub1) {
+    float k = (float)motif->size;
+    float log_fact = 0.0f;
+    for (ui i = 1; i <= motif->size; ++i)
+      log_fact += logf((float)i);
+
+    float dem = expf(log_fact / k);
+    float num = powf((float)current.totalCliques, (k - 1.0f) / k);
+
+    ub1_val = num / dem;
+
+    if (ub1_val < upperBound)
+      upperBound = ub1_val;
+  }
+
+  // ------------------------------------------------
+  // UB2 (degree-based bound)
+  // ------------------------------------------------
+  if (ub2) {
+    float dem = (float)(motif->size * current.totalCliques);
+    ub2_val = 0.0f;
+
+    for (ui v = 0; v < current.cliqueDegree.size(); v++) {
+      float pv = current.cliqueDegree[v] / dem;
+      ub2_val += pv * pv;
+    }
+
+    ub2_val *= current.totalCliques;
+    if (ub2_val < upperBound)
+      upperBound = ub2_val;
+  }
+
+  // ------------------------------------------------
+  // 3. Exact solve on this component
+  // ------------------------------------------------
+  exact(res, current, lowerBound, upperBound);
+
+  // cout << "after exact" << endl;
+
+  // ------------------------------------------------
+  // 4. Count motifs and vertices in result
+  // ------------------------------------------------
+  long cliqueCount = 0;
+  ui vertexCount = 0;
+
+  for (const auto &entry : current.cliqueData) {
+    const vector<int> &temp = entry.second;
+    int i = 0;
+    for (; i < (int)temp.size() - 1; ++i) {
+      if (res[temp[i]] == -1)
+        break;
+    }
+    if (i == (int)temp.size() - 1)
+      cliqueCount += temp[i];
+  }
+
+  for (int i = 0; i < current.size; i++) {
+    if (res[i] != -1)
+      vertexCount++;
+  }
+
+  if (vertexCount == 0)
+    vertexCount = current.size;
+
+  float density = (float)cliqueCount / (float)vertexCount;
+
+  // ------------------------------------------------
+  // 5. Update densest subgraph
+  // ------------------------------------------------
+  if (density > densestSubgraph.density) {
+
+    densestSubgraph.density = density;
+    lowerBound = density;
+    densestSubgraph.size = vertexCount;
+
+    densestSubgraph.verticies.clear();
+    densestSubgraph.verticies.reserve(vertexCount);
 
     for (int i = 0; i < current.size; i++) {
-      if (res[i] != -1)
-        vertexCount++;
-    }
-
-    if (vertexCount == 0)
-      vertexCount = current.size;
-
-    float density = (float)cliqueCount / (float)vertexCount;
-
-    // ------------------------------------------------
-    // 5. Update densest subgraph
-    // ------------------------------------------------
-    if (density > densestSubgraph.density) {
-
-      densestSubgraph.density = density;
-      lowerBound = density;
-      densestSubgraph.size = vertexCount;
-
-      densestSubgraph.verticies.clear();
-      densestSubgraph.verticies.reserve(vertexCount);
-
-      for (int i = 0; i < current.size; i++) {
-        if (res[i] != -1) {
-          densestSubgraph.verticies.push_back(
-              densestCore.reverseMap[current.reverseMap[i]]);
-        }
+      if (res[i] != -1) {
+        densestSubgraph.verticies.push_back(
+            densestCore.reverseMap[current.reverseMap[i]]);
       }
     }
   }
 }
+}*/
 
 void CDS::exact(vector<int> &res, ConnectedComponentData &C, float lowerBound,
                 float upperBound) {
