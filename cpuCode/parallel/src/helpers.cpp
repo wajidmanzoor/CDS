@@ -1700,7 +1700,7 @@ void CDS::exact(vector<int> &res, ConnectedComponentData &C, float lowerBound,
 
   for (ui i = 0; i < FN.G.size(); i++) {
     cout << "Edges of node " << i << ": ";
-    for (auto &e : FN.G[i]) {
+    for (auto &e : FN.G[i])
       cout << e.to << " ";
     }
     cout << endl;
