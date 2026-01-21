@@ -1037,114 +1037,306 @@ void CDS::connectedComponentDecompose(
     unordered_map<string, vector<int>> &cliqueData,
     vector<ConnectedComponentData> &conCompList) {
 
-  vector<ui> status;
-  status.resize(newGraph.size(), 0);
-  int index = 0;
-  for (ui i = 0; i < newGraph.size(); i++) {
-    if (status[i] == 0) {
-      index++;
-      BFS(status, i, index, newGraph);
+  // ---------- PHASE 1: Parallel Component Discovery ----------
+  vector<ui> status(newGraph.size(), 0);
+  atomic<int> nextCompId(1); // Component IDs start from 1
+
+// Use parallel BFS with atomic operations
+#pragma omp parallel
+  {
+    queue<int> localQueue;
+
+#pragma omp for schedule(dynamic, 32) nowait
+    for (ui i = 0; i < newGraph.size(); i++) {
+      ui expected = 0;
+      // Try to claim this vertex as start of new component
+      ui *statusPtr = &status[i];
+      if (__atomic_compare_exchange_n(statusPtr, &expected, (ui)-1, false,
+                                      __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+        // Successfully claimed, start BFS
+        int compId = nextCompId.fetch_add(1);
+        status[i] = compId;
+        localQueue.push(i);
+
+        while (!localQueue.empty()) {
+          int u = localQueue.front();
+          localQueue.pop();
+
+          // Process neighbors
+          for (int v : newGraph[u]) {
+            ui vExpected = 0;
+            ui *vStatusPtr = &status[v];
+            // Try to claim neighbor
+            if (__atomic_compare_exchange_n(vStatusPtr, &vExpected, compId,
+                                            false, __ATOMIC_ACQ_REL,
+                                            __ATOMIC_RELAXED)) {
+              localQueue.push(v);
+            }
+            // If neighbor already claimed by us (compId), skip
+            else if (status[v] == compId) {
+              continue;
+            }
+            // If neighbor claimed by another thread (-1), wait and retry
+            else if (status[v] == (ui)-1) {
+              // Busy wait until neighbor gets a proper compId
+              while (status[v] == (ui)-1) {
+// Use CPU pause instruction if available
+#ifdef __x86_64__
+                asm volatile("pause" ::: "memory");
+#endif
+              }
+            }
+          }
+        }
+      }
     }
   }
-  // cout << "here " << endl;
 
-  if (index == 1) {
+  // Resolve any remaining -1 values
+  for (ui i = 0; i < newGraph.size(); i++) {
+    if (status[i] == (ui)-1) {
+      status[i] = nextCompId.fetch_add(1);
+    }
+  }
+
+  int numComponents = nextCompId.load() - 1;
+
+  // ---------- PHASE 2: Parallel Analysis ----------
+  if (numComponents == 1) {
+    // Single component - parallelize processing
     ConnectedComponentData conComp;
-    conComp.totalCliques = 0;
     conComp.size = newGraph.size();
-    conComp.cliqueDegree.resize(conComp.size);
-    for (const auto &entry : cliqueData) {
-      const vector<int> &temp = entry.second;
-      for (ui i = 0; i < temp.size() - 1; i++) {
-        conComp.cliqueDegree[temp[i]] += temp[temp.size() - 1];
+    conComp.reverseMap.resize(conComp.size);
+    iota(conComp.reverseMap.begin(), conComp.reverseMap.end(), 0);
+
+    // Parallel clique degree computation
+    conComp.totalCliques = 0;
+    conComp.cliqueDegree.resize(conComp.size, 0);
+
+// Use thread-local accumulators
+#pragma omp parallel
+    {
+      vector<long> localCliqueDegree(conComp.size, 0);
+      long localTotalCliques = 0;
+
+      // Use iterator for unordered_map
+      auto itBegin = cliqueData.begin();
+      auto itEnd = cliqueData.end();
+      ui mapSize = cliqueData.size();
+
+#pragma omp for schedule(dynamic, 100)
+      for (ui idx = 0; idx < mapSize; idx++) {
+        // Manually iterate (unordered_map doesn't support random access)
+        auto it = cliqueData.begin();
+        advance(it, idx);
+
+        const vector<int> &temp = it->second;
+        long weight = temp[temp.size() - 1];
+        localTotalCliques += weight;
+
+        for (ui i = 0; i < temp.size() - 1; i++) {
+          localCliqueDegree[temp[i]] += weight;
+        }
       }
-      conComp.totalCliques += temp[temp.size() - 1];
+
+// Reduce local arrays
+#pragma omp critical
+      {
+        conComp.totalCliques += localTotalCliques;
+        for (ui i = 0; i < conComp.size; i++) {
+          conComp.cliqueDegree[i] += localCliqueDegree[i];
+        }
+      }
     }
 
     conComp.graph = newGraph;
     conComp.cliqueData = cliqueData;
     conComp.density = (double)conComp.totalCliques / ((double)conComp.size);
-    conComp.reverseMap.resize(conComp.size);
-    iota(conComp.reverseMap.begin(), conComp.reverseMap.end(), 0);
     conCompList.push_back(conComp);
 
   } else {
-    vector<unordered_map<string, vector<int>>> cliqueDataList;
-    cliqueDataList.resize(index + 1);
-    vector<ui> graphSizeList;
-    graphSizeList.resize(index + 1, 0);
-    vector<ui> oldToNew;
-    oldToNew.resize(newGraph.size(), 0);
+    // Multiple components - parallelize per-component processing
 
+    // Step 1: Count vertices per component in parallel
+    vector<atomic<int>> compSizes(numComponents + 1);
+    for (int i = 0; i <= numComponents; i++)
+      compSizes[i].store(0);
+
+#pragma omp parallel for
     for (ui i = 0; i < newGraph.size(); i++) {
-      oldToNew[i] = graphSizeList[status[i]];
-      graphSizeList[status[i]]++;
+      int compId = status[i];
+      compSizes[compId].fetch_add(1);
     }
 
-    vector<vector<ui>> reverseMapList;
-    reverseMapList.resize(index + 1);
-
-    for (int i = 1; i <= index; i++) {
-      reverseMapList.resize(graphSizeList[i]);
-    }
-
-    vector<ui> tempIndex;
-    tempIndex.resize(index + 1);
-    for (ui i = 0; i < newGraph.size(); i++) {
-      ui compId = status[i];
-      ui newVertexId = oldToNew[i];
-      reverseMapList[compId][newVertexId] = i;
-      tempIndex[compId]++;
-    }
-
-    for (auto &entry : cliqueData) {
-      int temp = entry.second[0];
-      auto &array = entry.second;
-      for (ui i = 0; i < array.size() - 1; i++) {
-        array[i] = oldToNew[array[i]];
-      }
-      cliqueDataList[status[temp]][entry.first] = entry.second;
-    }
-
-    vector<vector<vector<ui>>> graphList;
-    graphList.resize(index + 1);
-    for (int i = 1; i < index + 1; i++) {
-      graphList[i].resize(graphSizeList[i]);
-    }
-
-    for (ui i = 0; i < newGraph.size(); i++) {
-      for (int j = 0; j < (int)newGraph[i].size(); j++) {
-        graphList[status[i]][oldToNew[i]].push_back(oldToNew[newGraph[i][j]]);
-      }
-    }
-
-    for (int i = 1; i < index + 1; i++) {
-      ConnectedComponentData conComp;
-      conComp.totalCliques = 0;
-      conComp.cliqueDegree.resize(graphSizeList[i], 0);
-      for (const auto &entry : cliqueDataList[i]) {
-        const vector<int> &temp = entry.second;
-        for (ui i = 0; i < temp.size() - 1; i++) {
-          conComp.cliqueDegree[temp[i]] += temp[temp.size() - 1];
+    // Step 2: Parallel prefix sum for vertex mapping
+    vector<int> compOffsets(numComponents + 2, 0);
+#pragma omp parallel
+    {
+#pragma omp single
+      {
+        for (int comp = 1; comp <= numComponents; comp++) {
+          compOffsets[comp] =
+              compOffsets[comp - 1] + compSizes[comp - 1].load();
         }
-        conComp.totalCliques = temp[temp.size() - 1];
       }
-      conComp.graph = graphList[i];
-      conComp.size = graphSizeList[i];
-      conComp.cliqueData = cliqueDataList[i];
-      conComp.density = (double)conComp.totalCliques / ((double)conComp.size);
-      conComp.reverseMap = reverseMapList[i];
-      conCompList.push_back(conComp);
+    }
+
+    // Step 3: Parallel vertex assignment to components
+    vector<int> oldToNew(newGraph.size());
+    vector<vector<int>> compVertices(numComponents + 1);
+    vector<atomic<int>> compCounters(numComponents + 1);
+    for (int i = 0; i <= numComponents; i++)
+      compCounters[i].store(0);
+
+#pragma omp parallel
+    {
+      vector<vector<int>> localCompVertices(numComponents + 1);
+
+#pragma omp for schedule(static)
+      for (ui i = 0; i < newGraph.size(); i++) {
+        int compId = status[i];
+        int counter = compCounters[compId].fetch_add(1);
+        int newId = compOffsets[compId] + counter;
+        oldToNew[i] = newId;
+        localCompVertices[compId].push_back(i);
+      }
+
+      // Merge local vertex lists
+      for (int comp = 1; comp <= numComponents; comp++) {
+        if (!localCompVertices[comp].empty()) {
+#pragma omp critical
+          {
+            compVertices[comp].insert(compVertices[comp].end(),
+                                      localCompVertices[comp].begin(),
+                                      localCompVertices[comp].end());
+          }
+        }
+      }
+    }
+
+    // Step 4: Build reverse maps in parallel
+    vector<vector<ui>> reverseMapList(numComponents + 1);
+#pragma omp parallel for
+    for (int comp = 1; comp <= numComponents; comp++) {
+      reverseMapList[comp].resize(compSizes[comp].load());
+      for (ui i = 0; i < compVertices[comp].size(); i++) {
+        int oldVertex = compVertices[comp][i];
+        int newVertex = oldToNew[oldVertex];
+        reverseMapList[comp][newVertex - compOffsets[comp]] = oldVertex;
+      }
+    }
+
+    // Step 5: Parallel clique data distribution
+    vector<unordered_map<string, vector<int>>> cliqueDataList(numComponents +
+                                                              1);
+
+#pragma omp parallel
+    {
+      vector<unordered_map<string, vector<int>>> localCliqueDataList(
+          numComponents + 1);
+      vector<ui> cliqueKeys;
+
+// Copy keys to vector for parallel iteration
+#pragma omp single
+      {
+        cliqueKeys.reserve(cliqueData.size());
+        for (const auto &entry : cliqueData) {
+          cliqueKeys.push_back(0); // Placeholder, we'll use index
+        }
+      }
+
+#pragma omp barrier
+
+// Process cliques in parallel using index-based iteration
+#pragma omp for schedule(dynamic, 50)
+      for (ui idx = 0; idx < cliqueData.size(); idx++) {
+        auto it = cliqueData.begin();
+        advance(it, idx);
+
+        vector<int> temp = it->second; // Copy
+        int compId =
+            status[temp[0]]; // All vertices in clique belong to same component
+
+        // Remap vertex IDs
+        for (ui i = 0; i < temp.size() - 1; i++) {
+          temp[i] = oldToNew[temp[i]];
+        }
+
+        localCliqueDataList[compId][it->first] = temp;
+      }
+
+      // Merge local maps
+      for (int comp = 1; comp <= numComponents; comp++) {
+        if (!localCliqueDataList[comp].empty()) {
+#pragma omp critical
+          {
+            cliqueDataList[comp].merge(localCliqueDataList[comp]);
+          }
+        }
+      }
+    }
+
+    // Step 6: Parallel graph building for each component
+    vector<vector<vector<ui>>> graphList(numComponents + 1);
+#pragma omp parallel for
+    for (int comp = 1; comp <= numComponents; comp++) {
+      int compSize = compSizes[comp].load();
+      graphList[comp].resize(compSize);
+
+      // Build adjacency list for this component
+      for (int oldVertex : compVertices[comp]) {
+        int newVertex = oldToNew[oldVertex];
+        int localNewVertex = newVertex - compOffsets[comp];
+
+        for (int oldNeighbor : newGraph[oldVertex]) {
+          if (status[oldNeighbor] == (ui)comp) { // Same component
+            int newNeighbor = oldToNew[oldNeighbor];
+            int localNewNeighbor = newNeighbor - compOffsets[comp];
+            graphList[comp][localNewVertex].push_back(localNewNeighbor);
+          }
+        }
+      }
+    }
+
+    // Step 7: Parallel component data construction
+    conCompList.resize(numComponents);
+
+#pragma omp parallel for schedule(dynamic, 1)
+    for (int comp = 1; comp <= numComponents; comp++) {
+      ConnectedComponentData conComp;
+      conComp.size = compSizes[comp].load();
+      conComp.reverseMap = reverseMapList[comp];
+      conComp.graph = graphList[comp];
+      conComp.cliqueData = cliqueDataList[comp];
+
+      // Compute clique degree and total cliques for this component
+      conComp.totalCliques = 0;
+      conComp.cliqueDegree.resize(conComp.size, 0);
+
+      for (const auto &entry : cliqueDataList[comp]) {
+        const vector<int> &temp = entry.second;
+        long weight = temp[temp.size() - 1];
+        conComp.totalCliques += weight;
+
+        for (ui i = 0; i < temp.size() - 1; i++) {
+          int localVertex = temp[i] - compOffsets[comp];
+          conComp.cliqueDegree[localVertex] += weight;
+        }
+      }
+
+      conComp.density = (conComp.size > 0) ? (double)conComp.totalCliques /
+                                                 (double)conComp.size
+                                           : 0.0;
+
+      conCompList[comp - 1] = conComp; // Store in 0-indexed list
     }
   }
 }
-
 // New parts
 
 void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
                        DensestCoreData &densestCore,
-                       finalResult &densestSubgraph, float &ub1_val,
-                       float &ub2_val, bool ub1, bool ub2) {
+                       finalResult &densestSubgraph, bool ub1, bool ub2) {
 
   ConnectedComponentData current = conCompList[0];
   float lowerBound = 0.0f;
@@ -1664,11 +1856,8 @@ void CDS::DSD() {
 
   finalResult densestSubgraph;
   t1 = Clock::now();
-  float ub1_val;
-  float ub2_val;
 
-  dynamicExact(conCompList, densestCore, densestSubgraph, ub1_val, ub2_val, ub1,
-               ub2);
+  dynamicExact(conCompList, densestCore, densestSubgraph, ub1, ub2);
   t2 = Clock::now();
   double time_de = std::chrono::duration<double, std::milli>(t2 - t1).count();
   auto end = Clock::now();
@@ -1706,10 +1895,6 @@ void CDS::DSD() {
   }
   cout << "Paper_lower_bound: " << lb << endl;
   cout << "Paper_upper_bopund: " << densestCore.maxCliqueCore << endl;
-  if (ub1)
-    cout << "UB1: " << ub1_val << endl;
-  if (ub2)
-    cout << "UB2: " << ub2_val << endl;
 
   cout << "K: " << motif->size << endl;
   cout << "Density: " << densestSubgraph.density << endl;

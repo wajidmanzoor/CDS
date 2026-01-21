@@ -70,7 +70,7 @@ public:
                               vector<ConnectedComponentData> &conCompList);
   void dynamicExact(vector<ConnectedComponentData> &conCompList,
                     DensestCoreData &densestCore, finalResult &densestSubgraph,
-                    float &ub1_val, float &ub2_val, bool ub1, bool ub2);
+                    bool ub1, bool ub2);
 
   void DSD();
 };

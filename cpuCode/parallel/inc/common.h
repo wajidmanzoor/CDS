@@ -30,6 +30,7 @@
 #include <sys/stat.h>
 #include <utility>
 
+#include <atomic>
 #include <chrono>
 #include <omp.h>
 
