@@ -979,7 +979,7 @@ void CDS::listCliqueRecord(ui k, vector<ui> &partialClique,
     }
   }
 }
-
+/*
 int CDS::pruneInvalidEdges(vector<vector<ui>> &oldGraph,
                            vector<vector<ui>> &newGraph,
                            unordered_map<string, vector<int>> &cliqueData) {
@@ -1016,7 +1016,108 @@ int CDS::pruneInvalidEdges(vector<vector<ui>> &oldGraph,
 
   return totalEdges / 2;
 }
+*/
+int CDS::pruneInvalidEdges(vector<vector<ui>> &oldGraph,
+                           vector<vector<ui>> &newGraph,
+                           unordered_map<string, vector<int>> &cliqueData) {
 
+  const int numThreads = omp_get_max_threads();
+
+  // ---------- PHASE 1: Parallel edge marking ----------
+  // Use thread-local unordered_sets to avoid synchronization
+  vector<unordered_set<int>> threadLocalValidEdges(numThreads *
+                                                   oldGraph.size());
+
+#pragma omp parallel
+  {
+    int tid = omp_get_thread_num();
+    int offset = tid * oldGraph.size();
+
+// Convert cliqueData to vector for parallel iteration
+#pragma omp single
+    {
+      // Empty - we'll use index-based iteration below
+    }
+
+    // Get cliqueData size once
+    ui cliqueDataSize = cliqueData.size();
+
+// Use index-based iteration for unordered_map
+#pragma omp for schedule(dynamic, 100)
+    for (ui idx = 0; idx < cliqueDataSize; idx++) {
+      auto it = cliqueData.begin();
+      advance(it, idx);
+
+      const vector<int> &temp = it->second;
+      ui tempSize = temp.size() - 1; // Exclude the count at the end
+
+      // Mark edges between all pairs of vertices in this clique
+      for (ui i = 0; i < tempSize; i++) {
+        int vi = temp[i];
+        for (ui j = i + 1; j < tempSize; j++) {
+          int vj = temp[j];
+          // Store in thread-local set
+          threadLocalValidEdges[offset + vi].insert(vj);
+          threadLocalValidEdges[offset + vj].insert(vi);
+        }
+      }
+    }
+  }
+
+  // ---------- PHASE 2: Merge thread-local results ----------
+  // Create final validEdges as vector of unordered_sets for faster lookup
+  vector<unordered_set<int>> validEdges(oldGraph.size());
+
+#pragma omp parallel for schedule(static)
+  for (ui vertex = 0; vertex < oldGraph.size(); vertex++) {
+    // Combine valid edges from all threads
+    for (int tid = 0; tid < numThreads; tid++) {
+      int threadOffset = tid * oldGraph.size();
+      const unordered_set<int> &threadSet =
+          threadLocalValidEdges[threadOffset + vertex];
+
+      // Insert all edges from this thread's set
+      validEdges[vertex].insert(threadSet.begin(), threadSet.end());
+    }
+  }
+
+  // Clear thread-local memory
+  threadLocalValidEdges.clear();
+  threadLocalValidEdges.shrink_to_fit();
+
+  // ---------- PHASE 3: Parallel graph building ----------
+  newGraph.resize(oldGraph.size());
+  atomic<int> totalEdgesCounter(0);
+
+#pragma omp parallel for schedule(static)
+  for (ui i = 0; i < oldGraph.size(); i++) {
+    int localEdgeCount = 0;
+
+    // Get reference to valid edges for this vertex
+    const unordered_set<int> &validSet = validEdges[i];
+
+    // Reserve capacity for better performance
+    newGraph[i].reserve(min(oldGraph[i].size(), validSet.size()));
+
+    // Filter neighbors
+    for (ui neighbor : oldGraph[i]) {
+      // Check if edge (i, neighbor) is valid
+      // Only need to check one direction since graph is undirected
+      if (validSet.find(neighbor) != validSet.end()) {
+        newGraph[i].push_back(neighbor);
+        localEdgeCount++;
+      }
+    }
+
+    // Accumulate edge count atomically
+    totalEdgesCounter.fetch_add(localEdgeCount);
+  }
+
+  // Undirected graph: each edge counted twice
+  int totalEdges = totalEdgesCounter.load() / 2;
+
+  return totalEdges;
+}
 void CDS::BFS(vector<ui> &status, int vertex, int index,
               const vector<vector<ui>> &newGraph) {
   queue<int> q;
@@ -1338,6 +1439,7 @@ void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
                        DensestCoreData &densestCore,
                        finalResult &densestSubgraph, bool ub1, bool ub2) {
 
+  // ---------- Sequential initialization ----------
   ConnectedComponentData current = conCompList[0];
   float lowerBound = 0.0f;
 
@@ -1348,14 +1450,13 @@ void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
     }
   }
 
-  // Core density dominates component density
   if (ceil(lowerBound) < ceil(densestCore.density)) {
     lowerBound = densestCore.density;
   }
 
   float upperBound = densestCore.maxCliqueCore;
 
-  // Initialize densest subgraph with current component
+  // Initialize densest subgraph
   densestSubgraph.verticies.resize(current.size);
   for (int i = 0; i < current.size; i++) {
     densestSubgraph.verticies[i] =
@@ -1364,91 +1465,122 @@ void CDS::dynamicExact(vector<ConnectedComponentData> &conCompList,
   densestSubgraph.size = current.size;
   densestSubgraph.density = lowerBound;
 
+  // ---------- Parallel processing ----------
   atomic<float> globalLowerBound(lowerBound);
   atomic<float> globalUpperBound(upperBound);
-  finalResult globalBest = densestSubgraph;
-  omp_lock_t bestLock;
-  omp_init_lock(&bestLock);
+
+  // Use thread-local results to avoid sharing vectors
+  vector<finalResult> threadResults(omp_get_max_threads());
+  for (auto &result : threadResults) {
+    result.density = 0.0f;
+  }
+
 #pragma omp parallel
   {
-    finalResult threadBest = globalBest;
+    int tid = omp_get_thread_num();
     float threadLower = globalLowerBound.load();
     float threadUpper = globalUpperBound.load();
+
 #pragma omp for schedule(dynamic)
     for (ui cid = 0; cid < conCompList.size(); cid++) {
-      current = conCompList[cid];
+      ConnectedComponentData currentComp = conCompList[cid];
 
-      float localUpper = threadUpper;
+      // Skip if component can't beat current best
+      if (currentComp.density < threadLower) {
+        continue;
+      }
+
+      // Compute component-specific bounds
+      float componentUpper = threadUpper;
       if (ub1) {
         float k = (float)motif->size;
-        float log_fact = 0.0f;
-        for (ui i = 1; i <= motif->size; ++i)
-          log_fact += logf((float)i);
-        float dem = expf(log_fact / k);
-        float num = powf((float)current.totalCliques, (k - 1.0f) / k);
+        float logFact = 0.0f;
+        for (ui i = 1; i <= motif->size; ++i) {
+          logFact += logf((float)i);
+        }
+        float dem = expf(logFact / k);
+        float num = powf((float)currentComp.totalCliques, (k - 1.0f) / k);
         float localUb1 = num / dem;
-        if (localUb1 < localUpper)
-          localUpper = localUb1;
+        if (localUb1 < componentUpper) {
+          componentUpper = localUb1;
+        }
       }
 
       if (ub2) {
-        float dem = (float)(motif->size * current.totalCliques);
+        float dem = (float)(motif->size * currentComp.totalCliques);
         float localUb2 = 0.0f;
-        for (ui v = 0; v < current.cliqueDegree.size(); v++) {
-          float pv = current.cliqueDegree[v] / dem;
+        for (ui v = 0; v < currentComp.cliqueDegree.size(); v++) {
+          float pv = currentComp.cliqueDegree[v] / dem;
           localUb2 += pv * pv;
         }
-        localUb2 *= current.totalCliques;
-        if (localUb2 < localUpper)
-          localUpper = localUb2;
+        localUb2 *= currentComp.totalCliques;
+        if (localUb2 < componentUpper) {
+          componentUpper = localUb2;
+        }
       }
 
+      // Solve exact for this component
       vector<int> res;
-      exact(res, current, threadLower, localUpper);
+      exact(res, currentComp, threadLower, componentUpper);
 
+      // Compute density
       long cliqueCount = 0;
       ui vertexCount = 0;
-      for (const auto &entry : current.cliqueData) {
+
+      for (const auto &entry : currentComp.cliqueData) {
         const vector<int> &temp = entry.second;
         int i = 0;
         for (; i < (int)temp.size() - 1; ++i) {
-          if (res[temp[i]] == -1)
+          if (res[temp[i]] == -1) {
             break;
-        }
-        if (i == (int)temp.size() - 1)
-          cliqueCount += temp[i];
-      }
-      for (int i = 0; i < current.size; i++) {
-        if (res[i] != -1)
-          vertexCount++;
-      }
-      if (vertexCount == 0)
-        vertexCount = current.size;
-      float density = (float)cliqueCount / (float)vertexCount;
-
-      if (density > threadBest.density) {
-        threadBest.density = density;
-        threadBest.size = vertexCount;
-        threadBest.verticies.clear();
-        threadBest.verticies.reserve(vertexCount);
-        for (int i = 0; i < current.size; i++) {
-          if (res[i] != -1) {
-            threadBest.verticies.push_back(
-                densestCore.reverseMap[current.reverseMap[i]]);
           }
         }
-        threadLower = density; // Tighten local bound
+        if (i == (int)temp.size() - 1) {
+          cliqueCount += temp[i];
+        }
+      }
+
+      for (int i = 0; i < currentComp.size; i++) {
+        if (res[i] != -1) {
+          vertexCount++;
+        }
+      }
+
+      if (vertexCount == 0) {
+        vertexCount = currentComp.size;
+      }
+
+      float density = (float)cliqueCount / (float)vertexCount;
+
+      // Update thread-local best if better
+      if (density > threadResults[tid].density) {
+        threadResults[tid].density = density;
+        threadResults[tid].size = vertexCount;
+
+        // Clear and rebuild vertices vector
+        threadResults[tid].verticies.clear();
+        threadResults[tid].verticies.reserve(vertexCount);
+
+        for (int i = 0; i < currentComp.size; i++) {
+          if (res[i] != -1) {
+            threadResults[tid].verticies.push_back(
+                densestCore.reverseMap[currentComp.reverseMap[i]]);
+          }
+        }
+
+        // Update thread-local bound
+        threadLower = density;
       }
     }
-    omp_set_lock(&bestLock);
-    if (threadBest.density > globalBest.density) {
-      globalBest = threadBest;
-      globalLowerBound.store(threadBest.density);
-    }
-    omp_unset_lock(&bestLock);
   }
-  omp_destroy_lock(&bestLock);
-  densestSubgraph = globalBest;
+
+  // ---------- Sequential reduction ----------
+  // Find best result among all threads
+  for (const auto &threadResult : threadResults) {
+    if (threadResult.density > densestSubgraph.density) {
+      densestSubgraph = threadResult;
+    }
+  }
 }
 
 // =======
@@ -1858,6 +1990,7 @@ void CDS::DSD() {
   t1 = Clock::now();
 
   dynamicExact(conCompList, densestCore, densestSubgraph, ub1, ub2);
+  cout << "Dynamic exact: " << endl;
   t2 = Clock::now();
   double time_de = std::chrono::duration<double, std::milli>(t2 - t1).count();
   auto end = Clock::now();
