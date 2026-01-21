@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <bitset>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <ctime>
@@ -29,8 +30,10 @@
 #include <set>
 #include <sys/stat.h>
 #include <utility>
+
 #define debug 0
 using namespace std;
+using Clock = std::chrono::high_resolution_clock;
 
 typedef unsigned int ui;
 typedef unsigned short ushort;

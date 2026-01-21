@@ -56,12 +56,14 @@ public class DynamicExactalgo {
 		MDS mds=new MDS(justTest,index.motif_num,index.graph_size,low_bound);
 		mds.core = index;
 
+		System.out.println("Intial bounds: "+low_bound+" : "+up_bound);
+
 
 		//wm: iter over connected components
-		int wajid = 0;
+		int wajid2 = 0;
 		while(!queue.isEmpty()) {
-			//System.out.println("component "+ wajid);
-			wajid++;
+			System.out.println("component "+ wajid2);
+			wajid2++;
 
 			//wm: connected component
 			C=queue.remove();
