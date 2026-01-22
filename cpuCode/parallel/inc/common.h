@@ -34,8 +34,8 @@
 #include <chrono>
 #include <omp.h>
 
-#define debug 1
-#define THREAD_COUNT 8
+#define debug 0
+#define THREAD_COUNT 2
 using namespace std;
 using Clock = std::chrono::high_resolution_clock;
 
