@@ -31,9 +31,10 @@
 #include <sys/stat.h>
 #include <utility>
 
+using Clock = std::chrono::high_resolution_clock;
+
 #define debug 0
 using namespace std;
-using Clock = std::chrono::high_resolution_clock;
 
 typedef unsigned int ui;
 typedef unsigned short ushort;
