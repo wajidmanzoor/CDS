@@ -60,14 +60,6 @@ typedef struct {
 } deviceGraphPointers;
 
 typedef struct {
-
-  ui *componentOffset;
-  ui *components;
-  ui *mapping;
-  ui *reverseMapping;
-} deviceComponentPointers;
-
-typedef struct {
   ui *offset;
   ui *neighbors;
   ui *degree;
@@ -81,73 +73,15 @@ typedef struct {
 } deviceCliquesPointer;
 
 typedef struct {
-  ui *partialCliquesPartition; // Virtual Partition  array to store partial
-                               // cliques. each earp writes in its partition
-  ui *partialCliques; // cliques from above are written in continues memeory
-                      // here.
-  ui *candidatesPartition; // Virtual partition array that stores candidates of
-                           // each partial clique from partialCliquesPartition
-  ui *candidates; // Stores Candidates of each partial clique in partialCliques.
-  ui *offsetPartition; // Stores offset of candidates of each PC in
-                       // partialCliquesPartition.
-  ui *offset; // Stores offset of candidates of each PC in partialCliques.
-  ui *validNeighMaskPartition; // Stores mask of valid neighbors of candidates
-                               // of each clique in partialCliquesPartition.
-                               // Bitwise mask that can be used to get its
-                               // neighbors from neighbor array of DAG
-  ui *validNeighMask;          // Same as above but for partialCliques.
-  ui *count;                   // Number of partial cliques in each partiton.
-  ui *temp; // Use for offset calculation. Stores total candidates in each Warp.
-  ui *max;  // max degree in DAG.
-} cliqueLevelDataPointer;
-
-typedef struct {
   ui *partialCliques; // [maxTasks * (k-1)]
   ui *candidates;     // [maxCandidates]
   ui *offset;         // [maxTasks + 1]
   ui *validNeighMask; // [maxCandidates * maxBitMask]
 
   ui *taskCount; // scalar on device
+  ui *lock;
 } cliqueLevelDataBaseline;
-
-typedef struct {
-  ui *mapping;
-  ui *reverseMap;
-  ui *offset;
-  ui *neighbors;
-  ui *cliqueDegree;
-  double *density;
-  ui *n;
-  ui *m;
-  ui *totalCliques;
-
-} densestCorePointer;
-
-typedef struct {
-  ui *newOffset;
-  ui *newNeighbors;
-  ui *pruneStatus;
-
-} devicePrunedNeighbors;
-
-typedef struct {
-  ui *height;
-  double *excess;
-  ui *offset;
-  ui *neighbors;
-  double *capacity;
-  double *flow;
-  ui *flowIndex;
-
-} deviceFlowNetworkPointers;
 
 extern deviceGraphPointers deviceGraph;
 extern deviceDAGpointer deviceDAG;
-extern cliqueLevelDataPointer levelData;
-// extern deviceCliquesPointer cliqueData;
-extern densestCorePointer densestCore;
-extern deviceComponentPointers conComp;
-extern devicePrunedNeighbors prunedNeighbors;
-extern deviceCliquesPointer finalCliqueData;
-extern deviceFlowNetworkPointers flowNetwork;
-extern cliqueLevelDataBaseline cliqueData;
+extern deviceCliquesPointer cliqueData;
