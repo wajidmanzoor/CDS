@@ -9,6 +9,7 @@
 #include <cooperative_groups.h>
 #include <cub/cub.cuh>
 #include <iomanip>
+#include <queue>
 #include <thrust/async/copy.h>
 #include <thrust/binary_search.h>
 #include <thrust/sequence.h>
@@ -28,7 +29,9 @@ void globalRelabelCPU(hostFlowNetwork &flownetwork, ui flownetworkSize) {
     flownetwork.height[i] = UINT_MAX;
   }
 
-  Queue<ui> queue;
+  // Queue<ui> queue;
+  std::queue<ui> queue;
+
   flownetwork.height[sink] = 0;
   queue.push(sink);
 
