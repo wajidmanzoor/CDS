@@ -22,3 +22,11 @@ __global__ void writeFinalCliquesBaseline(cliqueLevelDataBaseline levelData,
                                           deviceDAGpointer D,
                                           deviceCliquesPointer C,
                                           ui *globalCounter, ui k);
+__global__ void
+writeFinalCliquesBaseline(deviceGraphPointers G,
+                          cliqueLevelDataBaseline levelData, deviceDAGpointer D,
+                          deviceCliquesPointer C, ui *globalCounter, ui k,
+                          ui maxBitMask, ui trieSize, ui totalWarps);
+__global__ void countCliques(deviceDAGpointer D,
+                             cliqueLevelDataBaseline levelData,
+                             ui *globalCounter, ui maxBitMask, ui totalWarps);

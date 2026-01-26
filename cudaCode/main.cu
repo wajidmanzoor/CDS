@@ -56,13 +56,22 @@ void generateDAG(const Graph &graph, deviceGraphPointers &deviceGraph,
   chkerr(cudaFree(listOrder));
 }
 
-ui listAllCliquesBaseline(const Graph &graph, deviceDAGpointer &deviceDAG,
+ui listAllCliquesBaseline(const Graph &graph, deviceGraphPointers deviceGraph,
+                          deviceDAGpointer &deviceDAG,
                           deviceCliquesPointer &cliqueData, ui k, ui pSize,
                           ui cSize) {
 
   cliqueLevelDataBaseline A, B;
+  int iterK = k;
 
-  ui maxDegree = max_element(graph.degree.begin(), graph.degree.end());
+  chkerr(cudaMemcpy(deviceGraph.degree, graph.degree.data(),
+                    graph.n * sizeof(ui), cudaMemcpyHostToDevice));
+
+  thrust::device_ptr<ui> dev_degree(deviceDAG.degree);
+  auto max_iter = thrust::max_element(dev_degree, dev_degree + graph.n);
+  int maxDegree = *max_iter;
+
+  // cout<<"MAX DEG: "<<maxDegree<<endl;
 
   // TODO: CHECK
   ui maxBitMask = allocLevelDataBaseline(A, k, pSize, cSize, maxDegree);
@@ -75,47 +84,75 @@ ui listAllCliquesBaseline(const Graph &graph, deviceDAGpointer &deviceDAG,
   chkerr(cudaMalloc((void **)&(labels), numWords * sizeof(ui)));
   cudaMemset(labels, 0, numWords * sizeof(ui));
 
-  chkerr(cudaMemcpy(deviceGraph.degree, graph.degree.data(),
-                    graph.n * sizeof(ui), cudaMemcpyHostToDevice));
+  /*chkerr(cudaMemcpy(deviceGraph.degree, graph.degree.data(),
+                    graph.n * sizeof(ui), cudaMemcpyHostToDevice));*/
+
+  size_t sharedMemoryIntialClique = WARPS_EACH_BLK * sizeof(ui);
 
   // level 0
-  listInitialCliquesBaseline<<<BLK_NUMS, BLK_DIM>>>(
-      deviceDAG, A, label, k, graph.n, maxBitMask, TOTAL_WARPS);
+  listInitialCliquesBaseline<<<BLK_NUMS, BLK_DIM, sharedMemoryIntialClique>>>(
+      deviceDAG, A, labels, k, graph.n, maxBitMask, TOTAL_WARPS);
   cudaDeviceSynchronize();
+  CUDA_CHECK_ERROR("Generate Initial Partial Cliques");
 
   cliqueLevelDataBaseline *read = &A, *write = &B;
 
   ui level = 1;
+  iterK--;
 
-  ui totalTasks;
+  size_t sharedMemoryMid = WARPS_EACH_BLK * sizeof(ui);
 
-  while (level < k - 1) {
+  // cout<<"done with first one"<<endl;
 
-    listMidCliquesBaseline<<<BLK_NUMS, BLK_DIM>>>(D, *read, *write, label, k,
-                                                  graph.n, level, maxBitMask,
-                                                  level, TOTAL_WARPS);
+  while (iterK > 2) {
+    // cout<<"start with second one"<<endl;
+
+    listMidCliquesBaseline<<<BLK_NUMS, BLK_DIM, sharedMemoryMid>>>(
+        deviceDAG, *read, *write, labels, k, graph.n, maxBitMask, level,
+        TOTAL_WARPS);
+
     cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Generate Mid Partial Cliques");
+    // cout<<"mid iter "<<iterK<<endl;
 
     std::swap(read, write);
     level++;
+    iterK--;
   }
 
   ui *globalCounter;
-  cudaMalloc(&globalCounter, sizeof(ui));
-  cudaMemset(globalCounter, 0, sizeof(ui));
+  chkerr(cudaMalloc((void **)&globalCounter, sizeof(ui)));
+  chkerr(cudaMemset(globalCounter, 0, sizeof(ui)));
 
-  memoryAllocationTrie(cliqueData, MAX_TASKS, k);
-
-  writeFinalCliquesBaseline<<<BLK_NUMS, BLK_DIM>>>(*read, deviceDAG, cliqueData,
-                                                   globalCounter, k);
+  ui *totalCliques;
+  chkerr(cudaMalloc((void **)&totalCliques, sizeof(ui)));
+  chkerr(cudaMemset(totalCliques, 0, sizeof(ui)));
   cudaDeviceSynchronize();
 
-  ui totalCliques;
-  cudaMemcpy(&totalCliques, globalCounter, sizeof(ui), cudaMemcpyDeviceToHost);
+  countCliques<<<BLK_NUMS, BLK_DIM>>>(deviceDAG, *read, totalCliques,
+                                      maxBitMask, TOTAL_WARPS);
+  cudaDeviceSynchronize();
+  CUDA_CHECK_ERROR("Count Num Cliques");
+  ui totalCliquesHost;
+  cudaMemcpy(&totalCliquesHost, totalCliques, sizeof(ui),
+             cudaMemcpyDeviceToHost);
+
+  memoryAllocationTrie(cliqueData, totalCliquesHost, k);
+
+  // cout<<"TOTAL CLIQUES BEFOEE"<<totalCliquesHost<<endl;
+
+  size_t sharedMemoryFinal = WARPS_EACH_BLK * sizeof(ui);
+
+  writeFinalCliquesBaseline<<<BLK_NUMS, BLK_DIM, sharedMemoryFinal>>>(
+      deviceGraph, *read, deviceDAG, cliqueData, globalCounter, k, maxBitMask,
+      totalCliquesHost, TOTAL_WARPS);
+  cudaDeviceSynchronize();
+  CUDA_CHECK_ERROR("Write Final Cliques");
+
   freeLevelDataBaseline(A);
   freeLevelDataBaseline(B);
 
-  return totalCliques;
+  return totalCliquesHost;
 }
 
 int main(int argc, const char *argv[]) {
@@ -163,23 +200,23 @@ int main(int argc, const char *argv[]) {
   std::chrono::duration<double, std::milli> dag_ms = dagEnd - start;
 
   ui totalCliques;
-  ui coreTotalCliques, maxCore;
-  double maxDensity;
+  // ui coreTotalCliques, maxCore;
+  // double maxDensity;
 
   std::vector<ui> coreSize;
-  std::chrono::high_resolution_clock::time_point coreDecomEnd;
   std::chrono::high_resolution_clock::time_point cliqueListEnd;
   std::chrono::duration<double, std::milli> cliqueList_ms;
-  std::chrono::duration<double, std::milli> coreDecom_ms;
-
-  totalCliques =
-      listAllCliquesBaseline(graph, deviceDAG, cliqueData, k, pSize, cSize);
+  totalCliques = listAllCliquesBaseline(graph, deviceGraph, deviceDAG,
+                                        cliqueData, k, pSize, cpSize);
 
   cliqueListEnd = std::chrono::high_resolution_clock::now();
   cliqueList_ms = cliqueListEnd - dagEnd;
 
   freeGraph(deviceGraph);
-  freeTrie(finalCliqueData);
+  freeTrie(cliqueData);
+  freeDAG(deviceDAG);
+  // freeTrie(finalCliqueData);
+  cout << "K: " << k << endl;
   cout << "Total Cliques=" << totalCliques << endl;
 
   std::cout << "DAG Time =" << dag_ms.count() << " ms" << std::endl;

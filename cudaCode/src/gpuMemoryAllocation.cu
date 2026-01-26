@@ -50,8 +50,11 @@ ui allocLevelDataBaseline(cliqueLevelDataBaseline &L, ui k, ui pSize, ui cSize,
   cudaMalloc(&L.offset, cSize * sizeof(ui));
   cudaMalloc(&L.validNeighMask, cSize * maxBitMask * sizeof(ui));
   cudaMalloc(&L.taskCount, sizeof(ui));
+  cudaMalloc(&L.lock, sizeof(ui));
 
   cudaMemset(L.taskCount, 0, sizeof(ui));
+  cudaMemset(L.lock, 0, sizeof(ui));
+
   cudaMemset(L.offset, 0, cSize * sizeof(ui));
 
   return maxBitMask;

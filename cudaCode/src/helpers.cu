@@ -88,32 +88,35 @@ __global__ void listInitialCliquesBaseline(deviceDAGpointer D,
   for (ui i = warpId; i < n; i += totalWarps) {
 
     ui vertex = i, vOff = D.offset[vertex];
-    ui localTaskCount = -1;
+
+    ui taskCount = 0;
     if (laneId == 0) {
       counter[threadIdx.x / warpSize] = 0;
 
       // Spin until we acquire the lock
-      while (atomicCAS(&lock, 0, 1) != 0) {
+      while (atomicCAS(levelData.lock, 0, 1) != 0) {
         // busy wait
       }
 
       // Critical section
-      localTaskCount = atomicAdd(&levelData.taskCount, 1);
+      taskCount = atomicAdd(levelData.taskCount, 1);
 
-      levelData.partialCliques[localTaskCount * (k - 1) + 0] = vertex;
-      levelData.offset[localTaskCount + 1] =
-          (localTaskCount == 0)
-              ? D.degree[vertex]
-              : levelData.offset[localTaskCount] + D.degree[vertex];
+      levelData.partialCliques[taskCount * (k - 1) + 0] = vertex;
+      levelData.offset[taskCount + 1] =
+          levelData.offset[taskCount] + D.degree[vertex];
 
       // Release lock
       __threadfence(); // ensure writes are visible
-      atomicExch(&lock, 0);
+      atomicExch(levelData.lock, 0);
     }
 
     // Broadcast taskCount to all threads in the warp
-    taskCount = __shfl_sync(0xFFFFFFFF, localTaskCount, 0);
+    taskCount = __shfl_sync(0xFFFFFFFF, taskCount, 0);
+    // printf("warp id %d task count %d \n",i,taskCount);
+
+    __syncwarp();
     ui cOff = levelData.offset[taskCount];
+
     for (ui j = laneId; j < D.degree[vertex]; j += warpSize) {
       ui neigh = D.neighbors[vOff + j];
       ui wordIdx = neigh / 32; // Which ui word (0, 1, 2, ...)
@@ -121,22 +124,22 @@ __global__ void listInitialCliquesBaseline(deviceDAGpointer D,
       ui mask = 1U << bitPos;
 
       ui old = atomicOr(&warpLabel[wordIdx], mask);
-      /*printf(" warp id %d i %d v %d j %d neigh %d deg %d vertex offset %d "
-             "wordIdx %d bitPos %d old %d  \n",
-             warpId, i, vertex, j, neigh, D.degree[vertex], vOff, wordIdx,
-             bitPos, old);*/
       if (!(old & mask)) {
         ui loc = atomicAdd(&counter[threadIdx.x / warpSize], 1);
         levelData.candidates[cOff + loc] = neigh;
       }
     }
     __syncwarp();
+
     ui counterValue = counter[threadIdx.x / warpSize];
+
     for (ui j = laneId; j < counterValue; j += warpSize) {
       ui cand = levelData.candidates[cOff + j];
       ui dOff = D.offset[cand], deg = D.degree[cand];
       ui chunks = (deg + 31) / 32;
 
+      // printf("warpId %d laneid %d cand %d off %d deg %d chunlks %d
+      // \n",i,j,cand,dOff,deg,chunks);
       for (ui m = 0; m < chunks; m++) {
         ui bitmask = 0, from = m * 32;
         ui to = min(from + 32, deg);
@@ -154,8 +157,6 @@ __global__ void listInitialCliquesBaseline(deviceDAGpointer D,
         // Use size_t for large index calculations
         size_t maskIdx = (cOff + j) * (size_t)maxBitMask + m;
         levelData.validNeighMask[maskIdx] = bitmask;
-        /*printf(" warp id %d i %d v %d valid location %zu mask %d cand %d \n",
-               warpId, i, vertex, maskIdx, bitmask, cand);*/
       }
     }
     __syncwarp();
@@ -185,7 +186,7 @@ __global__ void listMidCliquesBaseline(deviceDAGpointer D,
 
   ui oneLabelSize = (n + 31) / 32;
   ui *warpLabel = label + (size_t)warpId * oneLabelSize;
-  ui totalTasks = levelDataRead.taskCount;
+  ui totalTasks = *levelDataRead.taskCount;
 
   // Iterate over tasks from previous level
   for (ui t = warpId; t < totalTasks; t += totalWarps) {
@@ -217,7 +218,7 @@ __global__ void listMidCliquesBaseline(deviceDAGpointer D,
           ui mask = 1U << bit;
 
           if (!(warpLabel[wordIdx] & mask)) {
-            atomicAdd(&localCount, 1);
+            localCount++;
           }
         }
       }
@@ -226,101 +227,98 @@ __global__ void listMidCliquesBaseline(deviceDAGpointer D,
       for (int offset = 16; offset > 0; offset >>= 1)
         localCount += __shfl_down_sync(0xffffffff, localCount, offset);
 
-      ui writeTask = 0;
-      ui writeOffset = 0;
-
-      // --------------------------------
-      // Phase 2: reserve output space
-      // --------------------------------
-      if (laneId == 0 && localCount > 0) {
-
-        while (atomicCAS(&lock, 0, 1) != 0) {
-        }
-
-        writeTask = atomicAdd(&levelDataWrite.taskCount, 1);
-
-        levelDataWrite.offset[writeTask + 1] =
-            levelDataWrite.offset[writeTask] + localCount;
-
-        atomicExch(&lock, 0);
-      }
-
-      writeTask = __shfl_sync(0xffffffff, writeTask, 0);
-      writeOffset = levelDataWrite.offset[writeTask];
-
-      if (localCount == 0)
-        continue;
-
-      // --------------------------------
-      // Phase 3: write candidates
-      // --------------------------------
-
-      ui counter = 0;
-
-      for (ui j = laneId; j < deg; j += warpSize) {
-        ui maskIdx = j / 32;
-        ui bitPos = j % 32;
-
-        ui validMask =
-            levelDataRead.validNeighMask[(start + it) * maxBitMask + maskIdx];
-
-        if (validMask & (1U << bitPos)) {
-          ui nb = D.neighbors[pOff + j];
-
-          ui wordIdx = nb / 32;
-          ui bit = nb % 32;
-          ui mask = 1U << bit;
-
-          ui old = atomicOr(&warpLabel[wordIdx], mask);
-          if (!(old & mask)) {
-            ui pos = atomicAdd(&counter, 1);
-            levelDataWrite.candidates[writeOffset + pos] = nb;
-          }
-        }
-      }
+      localCount = __shfl_sync(0xffffffff, localCount, 0);
 
       __syncwarp();
 
-      // --------------------------------
-      // Write partial clique
-      // --------------------------------
-      if (laneId == 0) {
-        size_t base = (size_t)writeTask * (k - 1);
+      if (localCount != 0) {
+        ui writeTask = 0;
+        ui writeOffset = 0;
+        if (laneId == 0) {
+          counter[threadIdx.x / warpSize] = 0;
 
-        for (ui l = 0; l < level; l++) {
-          levelDataWrite.partialCliques[base + l] =
-              levelDataRead.partialCliques[(size_t)t * (k - 1) + l];
-        }
-        levelDataWrite.partialCliques[base + level] = pivot;
-      }
-
-      __syncwarp();
-
-      // --------------------------------
-      // Build valid neighbor mask
-      // --------------------------------
-      for (ui j = laneId; j < localCount; j += warpSize) {
-        ui cand = levelDataWrite.candidates[writeOffset + j];
-        ui dOff = D.offset[cand];
-        ui dDeg = D.degree[cand];
-
-        ui chunks = (dDeg + 31) / 32;
-
-        for (ui m = 0; m < chunks; m++) {
-          ui bitmask = 0;
-          ui from = m * 32;
-          ui to = min(from + 32, dDeg);
-
-          for (ui x = from; x < to; x++) {
-            ui nb = D.neighbors[dOff + x];
-            ui w = nb / 32;
-            ui b = nb % 32;
-            if (warpLabel[w] & (1U << b))
-              bitmask |= (1U << (x - from));
+          while (atomicCAS(levelDataRead.lock, 0, 1) != 0) {
           }
 
-          levelDataWrite.validNeighMask[(writeOffset + j) * maxBitMask + m] =
-              bitmask;
+          writeTask = atomicAdd(levelDataWrite.taskCount, 1);
+
+          levelDataWrite.offset[writeTask + 1] =
+              levelDataWrite.offset[writeTask] + localCount;
+          __threadfence(); // ensure writes are visible
+
+          atomicExch(levelDataRead.lock, 0);
+        }
+
+        writeTask = __shfl_sync(0xffffffff, writeTask, 0);
+        writeOffset = levelDataWrite.offset[writeTask];
+
+        __syncwarp();
+
+        for (ui j = laneId; j < deg; j += warpSize) {
+          ui maskIdx = j / 32;
+          ui bitPos = j % 32;
+
+          ui validMask =
+              levelDataRead.validNeighMask[(start + it) * maxBitMask + maskIdx];
+
+          if (validMask & (1U << bitPos)) {
+            ui nb = D.neighbors[pOff + j];
+
+            ui wordIdx = nb / 32;
+            ui bit = nb % 32;
+            ui mask = 1U << bit;
+
+            ui old = atomicOr(&warpLabel[wordIdx], mask);
+            if (!(old & mask)) {
+              ui pos = atomicAdd(&counter[threadIdx.x / warpSize], 1);
+              levelDataWrite.candidates[writeOffset + pos] = nb;
+            }
+          }
+        }
+
+        __syncwarp();
+
+        // --------------------------------
+        // Write partial clique
+        // --------------------------------
+        if (laneId == 0) {
+          size_t base = (size_t)writeTask * (k - 1);
+
+          for (ui l = 0; l < level; l++) {
+            levelDataWrite.partialCliques[base + l] =
+                levelDataRead.partialCliques[(size_t)t * (k - 1) + l];
+          }
+          levelDataWrite.partialCliques[base + level] = pivot;
+        }
+
+        __syncwarp();
+
+        // --------------------------------
+        // Build valid neighbor mask
+        // --------------------------------
+        for (ui j = laneId; j < localCount; j += warpSize) {
+          ui cand = levelDataWrite.candidates[writeOffset + j];
+          ui dOff = D.offset[cand];
+          ui dDeg = D.degree[cand];
+
+          ui chunks = (dDeg + 31) / 32;
+
+          for (ui m = 0; m < chunks; m++) {
+            ui bitmask = 0;
+            ui from = m * 32;
+            ui to = min(from + 32, dDeg);
+
+            for (ui x = from; x < to; x++) {
+              ui nb = D.neighbors[dOff + x];
+              ui w = nb / 32;
+              ui b = nb % 32;
+              if (warpLabel[w] & (1U << b))
+                bitmask |= (1U << (x - from));
+            }
+
+            levelDataWrite.validNeighMask[(writeOffset + j) * maxBitMask + m] =
+                bitmask;
+          }
         }
       }
 
@@ -338,16 +336,15 @@ __global__ void listMidCliquesBaseline(deviceDAGpointer D,
 
       __syncwarp();
     }
+    __syncwarp();
   }
 }
 
-__global__ void writeFinalCliquesBaseline(cliqueLevelDataBaseline levelData,
-                                          deviceDAGpointer D,
-                                          deviceCliquesPointer C,
-                                          ui *globalCounter, ui k) {
-
-  int warpId = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
-  int laneId = threadIdx.x % warpSize;
+__global__ void
+writeFinalCliquesBaseline(deviceGraphPointers G,
+                          cliqueLevelDataBaseline levelData, deviceDAGpointer D,
+                          deviceCliquesPointer cliqueData, ui *globalCounter,
+                          ui k, ui maxBitMask, ui trieSize, ui totalWarps) {
 
   extern __shared__ char sharedMemory[];
   ui sizeOffset = 0;
@@ -356,7 +353,7 @@ __global__ void writeFinalCliquesBaseline(cliqueLevelDataBaseline levelData,
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   int warpId = idx / warpSize;
   int laneId = idx % warpSize;
-  ui totalTasks = levelData.taskCount;
+  ui totalTasks = *levelData.taskCount;
   for (int i = warpId; i < totalTasks; i += totalWarps) {
 
     int start = levelData.offset[i];
@@ -400,6 +397,47 @@ __global__ void writeFinalCliquesBaseline(cliqueLevelDataBaseline levelData,
         atomicAdd(&G.cliqueDegree[pClique], counter[threadIdx.x / warpSize]);
       }
       __syncwarp();
+    }
+  }
+}
+
+__global__ void countCliques(deviceDAGpointer D,
+                             cliqueLevelDataBaseline levelData,
+                             ui *globalCounter, ui maxBitMask, ui totalWarps) {
+  /* Find Total number of cliques in the graph by counting the valid
+     neighbors. Each warp processes on partial clique. */
+
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int warpId = idx / warpSize;
+  int laneId = idx % warpSize;
+  ui totalTasks = *levelData.taskCount;
+
+  for (int i = warpId; i < totalTasks; i += totalWarps) {
+
+    // candidate offset
+    int start = levelData.offset[i];
+    int totalCandidates = levelData.offset[i + 1] - start;
+
+    int count = 0;
+
+    for (int j = laneId; j < totalCandidates; j += warpSize) {
+      int degree = D.degree[levelData.candidates[start + j]];
+      int numBitmasks = (degree + 31) / 32;
+      for (int x = 0; x < numBitmasks; x++) {
+        int neighBitMask =
+            levelData.validNeighMask[(start + j) * maxBitMask + x];
+        count += __popc(neighBitMask);
+      }
+    }
+
+    __syncwarp();
+
+    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+      count += __shfl_down_sync(0xFFFFFFFF, count, offset);
+    }
+
+    if (laneId == 0) {
+      atomicAdd(globalCounter, count);
     }
   }
 }

@@ -43,7 +43,7 @@ inline void chkerr_impl(cudaError_t code, const char *file, int line) {
 }
 
 // Inline function for createLevelDataOffset
-inline void createLevelDataOffset(cliqueLevelDataPointer levelData,
+/*inline void createLevelDataOffset(cliqueLevelDataPointer levelData,
                                   ui offsetPartitionSize, ui totalWarps) {
   // Use thrust::transform with device execution policy
   thrust::transform(
@@ -67,4 +67,4 @@ inline void createLevelDataOffset(cliqueLevelDataPointer levelData,
   // Perform inclusive scan on count array
   thrust::inclusive_scan(thrust::device, levelData.count,
                          levelData.count + totalWarps + 1, levelData.count);
-}
+}*/
