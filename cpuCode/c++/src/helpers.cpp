@@ -1044,6 +1044,7 @@ void CDS::connectedComponentDecompose(
     conCompList.push_back(conComp);
 
   } else {
+
     vector<unordered_map<string, vector<int>>> cliqueDataList;
     cliqueDataList.resize(index + 1);
     vector<ui> graphSizeList;
@@ -1060,7 +1061,7 @@ void CDS::connectedComponentDecompose(
     reverseMapList.resize(index + 1);
 
     for (int i = 1; i <= index; i++) {
-      reverseMapList.resize(graphSizeList[i]);
+      reverseMapList[i].resize(graphSizeList[i]);
     }
 
     vector<ui> tempIndex;
@@ -1074,11 +1075,11 @@ void CDS::connectedComponentDecompose(
 
     for (auto &entry : cliqueData) {
       int temp = entry.second[0];
-      auto &array = entry.second;
-      for (ui i = 0; i < array.size() - 1; i++) {
-        array[i] = oldToNew[array[i]];
+      auto &arr = entry.second;
+      for (ui i = 0; i < arr.size() - 1; i++) {
+        arr[i] = oldToNew[arr[i]];
       }
-      cliqueDataList[status[temp]][entry.first] = entry.second;
+      cliqueDataList[status[temp]][entry.first] = arr;
     }
 
     vector<vector<vector<ui>>> graphList;
@@ -1102,7 +1103,7 @@ void CDS::connectedComponentDecompose(
         for (ui i = 0; i < temp.size() - 1; i++) {
           conComp.cliqueDegree[temp[i]] += temp[temp.size() - 1];
         }
-        conComp.totalCliques = temp[temp.size() - 1];
+        conComp.totalCliques += temp[temp.size() - 1];
       }
       conComp.graph = graphList[i];
       conComp.size = graphSizeList[i];
@@ -1496,9 +1497,12 @@ void CDS::DSD() {
   vector<ConnectedComponentData> conCompList;
   t1 = Clock::now();
 
+  cout << "Clique count " << cliqueData.size() << endl;
+
   connectedComponentDecompose(newGraph, cliqueData, conCompList);
   t2 = Clock::now();
   double time_cc = std::chrono::duration<double, std::milli>(t2 - t1).count();
+
   if (debug) {
     cout << "Connected Components : " << endl;
 
