@@ -295,11 +295,8 @@ __global__ void listIntialCliques(deviceDAGpointer D,
 
     __syncwarp();
 
-    for (ui x = laneId; x < n; x += warpSize) {
-      ui wordIdx = x / 32;
-      ui bitPos = x % 32;
-      ui mask = ~(1U << bitPos); // Inverted mask to clear the bit
-      atomicAnd(&warpLabel[wordIdx], mask);
+    for (ui w = laneId; w < oneLabelSize; w += warpSize) {
+      warpLabel[w] = 0;
     }
 
     __syncwarp();
@@ -505,11 +502,8 @@ __global__ void listMidCliques(deviceDAGpointer D,
       __syncwarp();
 
       // Clear this warp's label bits using 32-bit atomic operations
-      for (int x = laneId; x < n; x += warpSize) {
-        ui wordIdx = x / 32;
-        ui bitPosition = x % 32;
-        ui mask = ~(1U << bitPosition); // Inverted mask to clear the bit
-        atomicAnd(&warpLabel[wordIdx], mask);
+      for (ui w = laneId; w < oneLabelSize; w += warpSize) {
+        warpLabel[w] = 0;
       }
 
       __syncwarp();
