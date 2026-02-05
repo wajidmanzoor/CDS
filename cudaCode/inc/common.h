@@ -28,7 +28,7 @@
 #include <utility>
 
 #define NUM_BLKS_PER_SM 1
-#define BLK_NUMS 216
+#define BLK_NUMS 80
 #define BLK_DIM 1024
 #define TOTAL_THREAD (BLK_NUMS * BLK_DIM)
 #define WARPSIZE 32
@@ -79,7 +79,7 @@ typedef struct {
   ui *validNeighMask; // [maxCandidates * maxBitMask]
 
   ui *taskCount; // scalar on device
-  ui *lock;
+  int *lock;
 } cliqueLevelDataBaseline;
 
 extern deviceGraphPointers deviceGraph;

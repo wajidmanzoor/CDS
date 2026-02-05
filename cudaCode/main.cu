@@ -18,6 +18,10 @@
 #include <chrono>
 
 bool DEBUG = false;
+#include <algorithm>
+#include <cstdint>
+#include <cstdio>
+#include <vector>
 
 void generateDAG(const Graph &graph, deviceGraphPointers &deviceGraph,
                  deviceDAGpointer &deviceDAG, vector<ui> listingOrder) {
@@ -75,7 +79,14 @@ ui listAllCliquesBaseline(const Graph &graph, deviceGraphPointers deviceGraph,
 
   // TODO: CHECK
   ui maxBitMask = allocLevelDataBaseline(A, k, pSize, cSize, maxDegree);
+
+  cudaDeviceSynchronize();
+  CUDA_CHECK_ERROR("Memory Allocation A");
+
   allocLevelDataBaseline(B, k, pSize, cSize, maxDegree);
+  cudaDeviceSynchronize();
+  CUDA_CHECK_ERROR("Memory Allocation B");
+  ;
   ui oneLabelSize = (graph.n + 31) / 32;
 
   size_t numWords = static_cast<size_t>(oneLabelSize) * TOTAL_WARPS;
@@ -86,14 +97,35 @@ ui listAllCliquesBaseline(const Graph &graph, deviceGraphPointers deviceGraph,
 
   /*chkerr(cudaMemcpy(deviceGraph.degree, graph.degree.data(),
                     graph.n * sizeof(ui), cudaMemcpyHostToDevice));*/
-
   size_t sharedMemoryIntialClique = WARPS_EACH_BLK * sizeof(ui);
 
   // level 0
+
+  ui *baseCounter;
+
+  chkerr(cudaMalloc((void **)&baseCounter, sizeof(ui)));
+  chkerr(cudaMemset(baseCounter, 0, sizeof(ui)));
+
+  cudaDeviceSynchronize();
+
   listInitialCliquesBaseline<<<BLK_NUMS, BLK_DIM, sharedMemoryIntialClique>>>(
-      deviceDAG, A, labels, k, graph.n, maxBitMask, TOTAL_WARPS);
+      deviceDAG, A, labels, k, graph.n, maxBitMask, TOTAL_WARPS, baseCounter);
   cudaDeviceSynchronize();
   CUDA_CHECK_ERROR("Generate Initial Partial Cliques");
+
+  // debugPrintLevelDataHost_All_WithMaskCheck(A, deviceDAG, graph.n, k,
+  // level=1, maxBitMask,
+  // printBinaryMask=*/true);
+
+  ui taskCountHost;
+  cudaMemcpy(&taskCountHost, A.taskCount, sizeof(ui), cudaMemcpyDeviceToHost);
+
+  ui lastOffset;
+  cudaMemcpy(&lastOffset, &A.offset[taskCountHost], sizeof(ui),
+             cudaMemcpyDeviceToHost);
+
+  cudaMemcpy(&A.offset[taskCountHost + 1], &lastOffset, sizeof(ui),
+             cudaMemcpyHostToDevice);
 
   cliqueLevelDataBaseline *read = &A, *write = &B;
 
@@ -106,16 +138,44 @@ ui listAllCliquesBaseline(const Graph &graph, deviceGraphPointers deviceGraph,
 
   while (iterK > 2) {
     // cout<<"start with second one"<<endl;
+    cudaMemset(write->taskCount, 0, sizeof(ui));
+    cudaMemset(write->offset, 0,
+               (pSize + 1) * sizeof(ui)); // at least offset[0]=0
+    cudaMemset(write->lock, 0, sizeof(int));
+    size_t mask_size = (size_t)cSize * maxBitMask * sizeof(ui);
+    cudaMemset(write->validNeighMask, 0, mask_size);
+    chkerr(cudaMemset(baseCounter, 0, sizeof(ui)));
+
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Before  Mid Partial Cliques");
+
+    cudaDeviceSynchronize();
 
     listMidCliquesBaseline<<<BLK_NUMS, BLK_DIM, sharedMemoryMid>>>(
         deviceDAG, *read, *write, labels, k, graph.n, maxBitMask, level,
-        TOTAL_WARPS);
+        TOTAL_WARPS, baseCounter);
 
     cudaDeviceSynchronize();
     CUDA_CHECK_ERROR("Generate Mid Partial Cliques");
     // cout<<"mid iter "<<iterK<<endl;
 
+    // debugPrintLevelDataHost_All_WithMaskCheck(*write, deviceDAG, graph.n, k,
+    //(level + 1), maxBitMask,
+    // true);
+
+    // Write offset[taskCount + 1] after final Mid level
+    ui taskCountHost;
+    cudaMemcpy(&taskCountHost, write->taskCount, sizeof(ui),
+               cudaMemcpyDeviceToHost);
+
+    ui lastOffset;
+    cudaMemcpy(&lastOffset, &write->offset[taskCountHost], sizeof(ui),
+               cudaMemcpyDeviceToHost);
+
+    cudaMemcpy(&write->offset[taskCountHost + 1], &lastOffset, sizeof(ui),
+               cudaMemcpyHostToDevice);
     std::swap(read, write);
+
     level++;
     iterK--;
   }
@@ -137,17 +197,19 @@ ui listAllCliquesBaseline(const Graph &graph, deviceGraphPointers deviceGraph,
   cudaMemcpy(&totalCliquesHost, totalCliques, sizeof(ui),
              cudaMemcpyDeviceToHost);
 
-  memoryAllocationTrie(cliqueData, totalCliquesHost, k);
+  if (totalCliquesHost > 0) {
+    memoryAllocationTrie(cliqueData, totalCliquesHost, k);
 
-  // cout<<"TOTAL CLIQUES BEFOEE"<<totalCliquesHost<<endl;
+    // cout<<"TOTAL CLIQUES BEFOEE"<<totalCliquesHost<<endl;
 
-  size_t sharedMemoryFinal = WARPS_EACH_BLK * sizeof(ui);
+    size_t sharedMemoryFinal = WARPS_EACH_BLK * sizeof(ui);
 
-  writeFinalCliquesBaseline<<<BLK_NUMS, BLK_DIM, sharedMemoryFinal>>>(
-      deviceGraph, *read, deviceDAG, cliqueData, globalCounter, k, maxBitMask,
-      totalCliquesHost, TOTAL_WARPS);
-  cudaDeviceSynchronize();
-  CUDA_CHECK_ERROR("Write Final Cliques");
+    writeFinalCliquesBaseline<<<BLK_NUMS, BLK_DIM, sharedMemoryFinal>>>(
+        deviceGraph, *read, deviceDAG, cliqueData, globalCounter, k, maxBitMask,
+        totalCliquesHost, TOTAL_WARPS);
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR("Write Final Cliques");
+  }
 
   freeLevelDataBaseline(A);
   freeLevelDataBaseline(B);
@@ -156,7 +218,7 @@ ui listAllCliquesBaseline(const Graph &graph, deviceGraphPointers deviceGraph,
 }
 
 int main(int argc, const char *argv[]) {
-  if (argc != 8) {
+  if (argc != 5) {
     cout << "Server wrong input parameters!" << endl;
     exit(1);
   }
@@ -170,15 +232,6 @@ int main(int argc, const char *argv[]) {
                              // cliques in Listing Algorithm
   ui cpSize = atoi(argv[4]); // Virtual Partition size for storing Candidates
                              // of PC in Listing Algorithm
-  ui glBufferSize =
-      atoi(argv[5]); // Buffer to store the vertices that need to be removed
-                     // in clique core decompose peeling algorithm
-  ui partitionSize = atoi(argv[6]); // Virtual Partition to store the active
-                                    // node of each flownetwork
-  // ui t = atoi(argv[8]);             // Total Number of cliques.
-
-  int earlyStop = atoi(argv[7]);
-
   // Read Graph as a adcajency List.
   Graph graph = Graph(filepath);
 
@@ -211,6 +264,18 @@ int main(int argc, const char *argv[]) {
 
   cliqueListEnd = std::chrono::high_resolution_clock::now();
   cliqueList_ms = cliqueListEnd - dagEnd;
+
+  /* ui cd[totalCliques*k];
+
+   cudaMemcpy(cd,cliqueData.trie,totalCliques*k*sizeof(ui),cudaMemcpyDeviceToHost);
+
+   cout<<"Clique data "<<endl;
+   for(ui i=0;i<totalCliques;i++){
+     for(ui j=0; j<k;j++){
+       cout<<cd[j*totalCliques+i]<<" ";
+     }
+     cout<<endl;
+   }*/
 
   freeGraph(deviceGraph);
   freeTrie(cliqueData);

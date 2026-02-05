@@ -45,21 +45,91 @@ ui allocLevelDataBaseline(cliqueLevelDataBaseline &L, ui k, ui pSize, ui cSize,
                           ui maxDegree) {
   ui maxBitMask = (maxDegree + 31) / 32;
 
-  cudaMalloc(&L.partialCliques, pSize * sizeof(ui));
-  cudaMalloc(&L.candidates, cSize * sizeof(ui));
-  cudaMalloc(&L.offset, cSize * sizeof(ui));
-  cudaMalloc(&L.validNeighMask, cSize * maxBitMask * sizeof(ui));
-  cudaMalloc(&L.taskCount, sizeof(ui));
-  cudaMalloc(&L.lock, sizeof(ui));
+  // Calculate and log expected memory usage
+  size_t total_bytes = 0;
 
+  // Clear any previous CUDA errors
+  cudaGetLastError();
+
+  // 1. Allocate partialCliques
+  cudaError_t err =
+      cudaMalloc((void **)&(L.partialCliques), pSize * (k - 1) * sizeof(ui));
+  if (err != cudaSuccess) {
+    cout << "Failed to allocate partialCliques: " << cudaGetErrorString(err)
+         << " (size: " << pSize * (k - 1) * sizeof(ui) / (1024 * 1024) << " MB)"
+         << endl;
+    return 0;
+  }
+  total_bytes += pSize * (k - 1) * sizeof(ui);
+
+  // 2. Allocate candidates
+  err = cudaMalloc((void **)&(L.candidates), cSize * sizeof(ui));
+  if (err != cudaSuccess) {
+    cout << "Failed to allocate candidates: " << cudaGetErrorString(err)
+         << " (size: " << cSize * sizeof(ui) / (1024 * 1024) << " MB)" << endl;
+    cudaFree(L.partialCliques);
+    return 0;
+  }
+  total_bytes += cSize * sizeof(ui);
+
+  // 3. Allocate offset - FIXED: should be (pSize + 1) based on your kernel
+  // usage
+  err = cudaMalloc((void **)&(L.offset), (pSize + 1) * sizeof(ui));
+  if (err != cudaSuccess) {
+    cout << "Failed to allocate offset: " << cudaGetErrorString(err)
+         << " (size: " << (pSize + 1) * sizeof(ui) / (1024 * 1024) << " MB)"
+         << endl;
+    cudaFree(L.partialCliques);
+    cudaFree(L.candidates);
+    return 0;
+  }
+  total_bytes += (pSize + 1) * sizeof(ui);
+  size_t mask_size = (size_t)cSize * maxBitMask * sizeof(ui);
+
+  err = cudaMalloc((void **)&(L.validNeighMask), mask_size);
+  if (err != cudaSuccess) {
+    cout << "Failed to allocate validNeighMask: " << cudaGetErrorString(err)
+         << " (size: " << mask_size / (1024 * 1024) << " MB)" << endl;
+    cudaFree(L.partialCliques);
+    cudaFree(L.candidates);
+    cudaFree(L.offset);
+    return 0;
+  }
+  total_bytes += mask_size;
+
+  // 5. Allocate taskCount
+  err = cudaMalloc((void **)&(L.taskCount), sizeof(ui));
+  if (err != cudaSuccess) {
+    cout << "Failed to allocate taskCount: " << cudaGetErrorString(err) << endl;
+    cudaFree(L.partialCliques);
+    cudaFree(L.candidates);
+    cudaFree(L.offset);
+    cudaFree(L.validNeighMask);
+    return 0;
+  }
+  total_bytes += sizeof(ui);
+
+  // 6. Allocate lock
+  err = cudaMalloc((void **)&(L.lock), sizeof(int));
+  if (err != cudaSuccess) {
+    cout << "Failed to allocate lock: " << cudaGetErrorString(err) << endl;
+    cudaFree(L.partialCliques);
+    cudaFree(L.candidates);
+    cudaFree(L.offset);
+    cudaFree(L.validNeighMask);
+    cudaFree(L.taskCount);
+    return 0;
+  }
+  total_bytes += sizeof(int);
+
+  // Initialize memory
   cudaMemset(L.taskCount, 0, sizeof(ui));
-  cudaMemset(L.lock, 0, sizeof(ui));
-
-  cudaMemset(L.offset, 0, cSize * sizeof(ui));
+  cudaMemset(L.lock, 0, sizeof(int));
+  cudaMemset(L.offset, 0, (pSize + 1) * sizeof(ui));
+  cudaMemset(L.validNeighMask, 0, mask_size);
 
   return maxBitMask;
 }
-
 // Memory deallocation functions
 void freeGraph(deviceGraphPointers &G) {
   chkerr(cudaFree(G.offset));
